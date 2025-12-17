@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      
+    - name: Install MinGW-w64
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64 make
+        
+    - name: Build injector
+      run: make clean && make
+      
+    - name: Build example DLL
+      run: cd example && make
+      
+    - name: Create release package
+      run: |
+        mkdir -p release
+        cp bin/injector.exe release/
+        cp example/test.dll release/
+        cp README.md release/
+        cp LICENSE release/
+        cp scripts/inject.sh release/
+        chmod +x release/inject.sh
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: proton-injector
+        path: release/
+        retention-days: 90

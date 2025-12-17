@@ -1,0 +1,13 @@
+build/
+bin/
+*.o
+*.exe
+*.log
+*.txt
+*.so
+.vscode/
+.idea/
+*.swp
+*~
+
+!example/test.dll
