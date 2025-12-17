@@ -7,7 +7,7 @@ A DLL injector for Windows executables running under Proton with support for mul
 
 ## Download
 
-[Latest automated build](https://nightly.link/jokelbaf/proton-injector/workflows/build/main/proton-injector.zip)
+[Latest automated build](https://nightly.link/jokelbaf/proton-injector/workflows/build/master/proton-injector.zip)
 
 ## Features
 
@@ -200,24 +200,6 @@ cd example && make
 ```
 
 The test DLL will display a message box when successfully injected.
-
-## Real-World Examples
-
-### Wuthering Waves
-```bash
-APPID=2688520 ./scripts/inject.sh \
-    "$HOME/.local/share/Steam/steamapps/common/Wuthering Waves/Client/Binaries/Win64/Client-Win64-Shipping.exe" \
-    "/path/to/your/mod.dll" \
-    --method apc
-```
-
-### Genshin Impact
-```bash
-APPID=0 ./scripts/inject.sh \
-    "/path/to/GenshinImpact.exe" \
-    "/path/to/your/mod.dll" \
-    --method nt
-```
 
 ## Troubleshooting
 
