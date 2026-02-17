@@ -19,6 +19,66 @@ typedef NTSTATUS (NTAPI *NtCreateThreadEx_t)(
     PVOID AttributeList
 );
 
+static HMODULE find_remote_module_base(DWORD pid, const wchar_t *module_name) {
+    HANDLE snapshot = INVALID_HANDLE_VALUE;
+
+    for (int attempt = 0; attempt < 10; attempt++) {
+        snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+        if (snapshot != INVALID_HANDLE_VALUE) break;
+        Sleep(100);
+    }
+
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        LOG_ERROR(L"CreateToolhelp32Snapshot (SNAPMODULE) failed: %lu", GetLastError());
+        return NULL;
+    }
+
+    MODULEENTRY32W me = {0};
+    me.dwSize = sizeof(me);
+
+    HMODULE result = NULL;
+    if (Module32FirstW(snapshot, &me)) {
+        do {
+            if (_wcsicmp(me.szModule, module_name) == 0) {
+                result = (HMODULE)me.modBaseAddr;
+                break;
+            }
+        } while (Module32NextW(snapshot, &me));
+    }
+
+    CloseHandle(snapshot);
+    return result;
+}
+
+static FARPROC get_remote_proc_address(HANDLE process, const wchar_t *module_name, const char *func_name) {
+    HMODULE local_module = GetModuleHandleW(module_name);
+    if (!local_module) {
+        LOG_ERROR(L"Failed to get local %ls handle", module_name);
+        return NULL;
+    }
+
+    FARPROC local_func = GetProcAddress(local_module, func_name);
+    if (!local_func) {
+        LOG_ERROR(L"Failed to get local %hs address", func_name);
+        return NULL;
+    }
+
+    DWORD pid = GetProcessId(process);
+    HMODULE remote_module = find_remote_module_base(pid, module_name);
+    if (!remote_module) {
+        LOG_ERROR(L"Failed to find %ls in target process (PID: %lu)", module_name, pid);
+        return NULL;
+    }
+
+    DWORD_PTR offset = (DWORD_PTR)local_func - (DWORD_PTR)local_module;
+    FARPROC remote_func = (FARPROC)((DWORD_PTR)remote_module + offset);
+
+    LOG_DEBUG(L"Local  %ls base: 0x%p, %hs: 0x%p", module_name, local_module, func_name, local_func);
+    LOG_DEBUG(L"Remote %ls base: 0x%p, %hs: 0x%p (offset: 0x%llx)", module_name, remote_module, func_name, remote_func, (unsigned long long)offset);
+
+    return remote_func;
+}
+
 static BOOL inject_standard(HANDLE process, const wchar_t *dll_path) {
     SIZE_T dll_path_size = (wcslen(dll_path) + 1) * sizeof(wchar_t);
     
@@ -45,21 +105,12 @@ static BOOL inject_standard(HANDLE process, const wchar_t *dll_path) {
 
     LOG_DEBUG(L"DLL path written to remote process");
 
-    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!kernel32) {
-        LOG_ERROR(L"Failed to get kernel32.dll handle");
-        VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
-        return FALSE;
-    }
-
-    LoadLibraryW_t load_library_addr = (LoadLibraryW_t)GetProcAddress(kernel32, "LoadLibraryW");
+    LoadLibraryW_t load_library_addr = (LoadLibraryW_t)get_remote_proc_address(process, L"kernel32.dll", "LoadLibraryW");
     if (!load_library_addr) {
-        LOG_ERROR(L"Failed to get LoadLibraryW address");
+        LOG_ERROR(L"Failed to resolve LoadLibraryW in target process");
         VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
         return FALSE;
     }
-
-    LOG_DEBUG(L"LoadLibraryW address: 0x%p", load_library_addr);
 
     HANDLE remote_thread = CreateRemoteThread(
         process,
@@ -125,21 +176,12 @@ static BOOL inject_apc(HANDLE process, HANDLE thread, const wchar_t *dll_path) {
 
     LOG_DEBUG(L"DLL path written to remote process");
 
-    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!kernel32) {
-        LOG_ERROR(L"Failed to get kernel32.dll handle");
-        VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
-        return FALSE;
-    }
-
-    LoadLibraryA_t load_library_addr = (LoadLibraryA_t)GetProcAddress(kernel32, "LoadLibraryA");
+    LoadLibraryA_t load_library_addr = (LoadLibraryA_t)get_remote_proc_address(process, L"kernel32.dll", "LoadLibraryA");
     if (!load_library_addr) {
-        LOG_ERROR(L"Failed to get LoadLibraryA address");
+        LOG_ERROR(L"Failed to resolve LoadLibraryA in target process");
         VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
         return FALSE;
     }
-
-    LOG_DEBUG(L"LoadLibraryA address: 0x%p", load_library_addr);
 
     if (!QueueUserAPC((PAPCFUNC)load_library_addr, thread, (ULONG_PTR)remote_dll_path)) {
         LOG_ERROR(L"QueueUserAPC failed: %lu", GetLastError());
@@ -181,21 +223,12 @@ static BOOL inject_nt(HANDLE process, const wchar_t *dll_path) {
 
     LOG_DEBUG(L"DLL path written to remote process");
 
-    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!kernel32) {
-        LOG_ERROR(L"Failed to get kernel32.dll handle");
-        VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
-        return FALSE;
-    }
-
-    LoadLibraryA_t load_library_addr = (LoadLibraryA_t)GetProcAddress(kernel32, "LoadLibraryA");
+    LoadLibraryA_t load_library_addr = (LoadLibraryA_t)get_remote_proc_address(process, L"kernel32.dll", "LoadLibraryA");
     if (!load_library_addr) {
-        LOG_ERROR(L"Failed to get LoadLibraryA address");
+        LOG_ERROR(L"Failed to resolve LoadLibraryA in target process");
         VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
         return FALSE;
     }
-
-    LOG_DEBUG(L"LoadLibraryA address: 0x%p", load_library_addr);
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) {

@@ -134,6 +134,13 @@ int wmain(int argc, wchar_t **argv) {
     }
 
     LOG_INFO(L"Process created (PID: %lu)", pi.dwProcessId);
+
+    LOG_INFO(L"Resuming process for initialization...");
+    ResumeThread(pi.hThread);
+    Sleep(500);
+    SuspendThread(pi.hThread);
+    LOG_INFO(L"Re-suspending process after initialization");
+
     LOG_INFO(L"Injecting DLL...");
 
     if (!inject_dll(pi.hProcess, pi.hThread, pi.dwProcessId, dll_path_full, args.method)) {
