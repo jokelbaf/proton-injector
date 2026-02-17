@@ -138,8 +138,7 @@ int wmain(int argc, wchar_t **argv) {
     LOG_INFO(L"Resuming process for initialization...");
     ResumeThread(pi.hThread);
     Sleep(500);
-    SuspendThread(pi.hThread);
-    LOG_INFO(L"Re-suspending process after initialization");
+    LOG_INFO(L"Process initialized");
 
     LOG_INFO(L"Injecting DLL...");
 

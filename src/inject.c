@@ -183,6 +183,9 @@ static BOOL inject_apc(HANDLE process, HANDLE thread, const wchar_t *dll_path) {
         return FALSE;
     }
 
+    SuspendThread(thread);
+    LOG_DEBUG(L"Thread suspended for APC queuing");
+
     if (!QueueUserAPC((PAPCFUNC)load_library_addr, thread, (ULONG_PTR)remote_dll_path)) {
         LOG_ERROR(L"QueueUserAPC failed: %lu", GetLastError());
         VirtualFreeEx(process, remote_dll_path, 0, MEM_RELEASE);
