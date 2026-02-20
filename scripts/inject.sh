@@ -40,6 +40,14 @@ export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_PATH"
 export STEAM_COMPAT_DATA_PATH="$COMPAT_DATA"
 export PROTON_LOG=1
 
+STEAM_LAUNCHER="$STEAM_PATH/ubuntu12_32/steam-launch-wrapper"
+STEAM_REAPER="$STEAM_PATH/ubuntu12_32/reaper"
+
+if [ "${APPID}" != "0" ] && [ -n "${APPID}" ]; then
+    export SteamAppId="${APPID}"
+    export SteamGameId="${APPID}"
+fi
+
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <target.exe> <dll.dll> [additional args...]"
     echo ""
@@ -124,12 +132,13 @@ echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
 echo ""
 
-"$PROTON" waitforexitandrun \
-    "$WIN_INJECTOR" \
-    "$WIN_TARGET" \
-    "$WIN_DLL" \
-    --log-file "$WIN_LOG" \
-    "$@"
+PROTON_CMD=("$PROTON" waitforexitandrun "$WIN_INJECTOR" "$WIN_TARGET" "$WIN_DLL" --log-file "$WIN_LOG" "$@")
+
+if [ "${APPID}" != "0" ] && [ -n "${APPID}" ] && [ -x "$STEAM_LAUNCHER" ] && [ -x "$STEAM_REAPER" ]; then
+    "$STEAM_LAUNCHER" -- "$STEAM_REAPER" SteamLaunch AppId="$APPID" -- "${PROTON_CMD[@]}"
+else
+    "${PROTON_CMD[@]}"
+fi
 
 echo ""
 echo "Injection completed. Check $LOG_FILE for details."
