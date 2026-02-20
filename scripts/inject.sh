@@ -19,9 +19,6 @@ if [ $# -lt 2 ]; then
     echo "  STEAM_COMPAT_CLIENT_INSTALL_PATH     - Steam installation path"
     echo "  STEAM_COMPAT_DATA_PATH               - Proton compatdata path"
     echo "  PROTON_PATH                          - Path to Proton (e.g., proton-ge)"
-    echo ""
-    echo "Example:"
-    echo "  APPID=0 PROTON_PATH=proton-ge $0 /path/to/game.exe /path/to/mod.dll"
     exit 1
 fi
 
@@ -29,34 +26,35 @@ TARGET_EXE="$1"
 DLL_PATH="$2"
 shift 2
 
-INJECTOR_EXE="$PROJECT_ROOT/bin/injector.exe"
+if file "$TARGET_EXE" | grep -q "PE32+"; then
+    INJECTOR_EXE="$PROJECT_ROOT/bin/injector64.exe"
+    TARGET_ARCH="x64"
+else
+    INJECTOR_EXE="$PROJECT_ROOT/bin/injector32.exe"
+    TARGET_ARCH="x86"
+fi
+
 LOG_FILE="$PROJECT_ROOT/injector.log"
 
 INJECTION_METHOD="standard"
+PREV=""
 for arg in "$@"; do
-    if [[ "$arg" == --method ]]; then
-        INJECTION_METHOD="${@:$((OPTIND+1)):1}"
+    if [[ "$PREV" == "--method" ]]; then
+        INJECTION_METHOD="$arg"
+        break
     fi
+    PREV="$arg"
 done
 
 case "$INJECTION_METHOD" in
-    apc)
-        METHOD_DISPLAY="APC (QueueUserAPC)"
-        ;;
-    nt)
-        METHOD_DISPLAY="NT (NtCreateThreadEx)"
-        ;;
-    hook)
-        METHOD_DISPLAY="Hook (SetWindowsHookExA)"
-        ;;
-    *)
-        METHOD_DISPLAY="Standard (CreateRemoteThread)"
-        INJECTION_METHOD="standard"
-        ;;
+    apc)  METHOD_DISPLAY="APC (QueueUserAPC)" ;;
+    nt)   METHOD_DISPLAY="NT (NtCreateThreadEx)" ;;
+    hook) METHOD_DISPLAY="Hook (SetWindowsHookExA)" ;;
+    *)    METHOD_DISPLAY="Standard (CreateRemoteThread)"; INJECTION_METHOD="standard" ;;
 esac
 
 if [ ! -f "$INJECTOR_EXE" ]; then
-    echo "Error: injector.exe not found. Build the project first with 'make'"
+    echo "Error: $INJECTOR_EXE not found. Build the project first with 'make'"
     exit 1
 fi
 
@@ -72,7 +70,7 @@ fi
 
 PROTON="${PROTON_PATH:-proton-ge}"
 
-function to_windows_path() {
+to_windows_path() {
     echo "Z:$(realpath "$1" | sed 's/\//\\/g')"
 }
 
@@ -87,6 +85,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Proton:     $PROTON"
 echo "  App ID:     $APPID"
+echo "  Arch:       $TARGET_ARCH"
 echo "  Method:     $METHOD_DISPLAY"
 echo ""
 echo "  Target:     $TARGET_EXE"
@@ -96,7 +95,7 @@ echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
 echo ""
 
-"$PROTON" run \
+"$PROTON" waitforexitandrun \
     "$WIN_INJECTOR" \
     "$WIN_TARGET" \
     "$WIN_DLL" \

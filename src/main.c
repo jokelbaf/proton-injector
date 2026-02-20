@@ -27,9 +27,8 @@ static void print_usage(const wchar_t *program_name) {
 }
 
 static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
-    if (argc < 3) {
+    if (argc < 3)
         return 0;
-    }
 
     args->target_exe = argv[1];
     args->dll_path = argv[2];
@@ -41,15 +40,15 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
             args->log_file = argv[++i];
         } else if (wcscmp(argv[i], L"--method") == 0 && i + 1 < argc) {
             wchar_t *method = argv[++i];
-            if (wcscmp(method, L"standard") == 0) {
+            if (wcscmp(method, L"standard") == 0)
                 args->method = INJECTION_STANDARD;
-            } else if (wcscmp(method, L"apc") == 0) {
+            else if (wcscmp(method, L"apc") == 0)
                 args->method = INJECTION_APC;
-            } else if (wcscmp(method, L"nt") == 0) {
+            else if (wcscmp(method, L"nt") == 0)
                 args->method = INJECTION_NT;
-            } else if (wcscmp(method, L"hook") == 0) {
+            else if (wcscmp(method, L"hook") == 0)
                 args->method = INJECTION_HOOK;
-            } else {
+            else {
                 wprintf(L"Error: Invalid injection method '%ls'\n", method);
                 return 0;
             }
@@ -68,9 +67,8 @@ int wmain(int argc, wchar_t **argv) {
     }
 
     if (args.log_file) {
-        if (!logger_init(args.log_file)) {
+        if (!logger_init(args.log_file))
             wprintf(L"Warning: Failed to initialize logger\n");
-        }
     }
 
     LOG_INFO(L"Proton DLL Injector v%hs", VERSION);
@@ -103,9 +101,8 @@ int wmain(int argc, wchar_t **argv) {
     wchar_t workdir[MAX_PATH];
     wcscpy(workdir, target_exe_full);
     wchar_t *last_slash = wcsrchr(workdir, L'\\');
-    if (last_slash) {
+    if (last_slash)
         *last_slash = L'\0';
-    }
 
     LOG_INFO(L"Working directory: %ls", workdir);
     LOG_INFO(L"Starting target process...");
@@ -117,28 +114,17 @@ int wmain(int argc, wchar_t **argv) {
     wchar_t cmdline[MAX_PATH];
     wsprintfW(cmdline, L"\"%ls\"", target_exe_full);
 
-    if (!CreateProcessW(
-        NULL,
-        cmdline,
-        NULL,
-        NULL,
-        FALSE,
-        CREATE_SUSPENDED,
-        NULL,
-        workdir,
-        &si,
-        &pi
-    )) {
+    if (!CreateProcessW(NULL, cmdline, NULL, NULL, FALSE,
+                        CREATE_SUSPENDED, NULL, workdir, &si, &pi)) {
         LOG_ERROR(L"Failed to create process: error %lu", GetLastError());
         return 1;
     }
 
     LOG_INFO(L"Process created (PID: %lu)", pi.dwProcessId);
 
-    LOG_INFO(L"Resuming process for initialization...");
     ResumeThread(pi.hThread);
-    Sleep(500);
-    LOG_INFO(L"Process initialized");
+    wait_for_process_init(pi.hProcess, 10000);
+    LOG_INFO(L"Process ready");
 
     LOG_INFO(L"Injecting DLL...");
 
@@ -151,7 +137,6 @@ int wmain(int argc, wchar_t **argv) {
     }
 
     LOG_INFO(L"DLL injected successfully");
-    LOG_INFO(L"Resuming process...");
 
     ResumeThread(pi.hThread);
 
