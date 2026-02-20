@@ -5,7 +5,36 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 APPID="${APPID:-0}"
 STEAM_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
-COMPAT_DATA="${STEAM_COMPAT_DATA_PATH:-$STEAM_PATH/steamapps/compatdata/$APPID}"
+
+if [ ! -d "$STEAM_PATH" ] && [ -d "$HOME/.var/app/com.valvesoftware.Steam/data/Steam" ]; then
+    STEAM_PATH="$HOME/.var/app/com.valvesoftware.Steam/data/Steam"
+fi
+
+if [ -n "${STEAM_COMPAT_DATA_PATH:-}" ]; then
+    COMPAT_DATA="$STEAM_COMPAT_DATA_PATH"
+else
+    LIB_PATHS=()
+    LIB_PATHS+=("$STEAM_PATH")
+
+    LIB_VDF="$STEAM_PATH/steamapps/libraryfolders.vdf"
+    if [ -f "$LIB_VDF" ]; then
+        while IFS= read -r line; do
+            if [[ $line =~ \"path\"[[:space:]]+\"([^\"]+)\" ]]; then
+                LIB_PATHS+=("${BASH_REMATCH[1]}")
+            fi
+        done < "$LIB_VDF"
+    fi
+
+    for lib in "${LIB_PATHS[@]}"; do
+        CANDIDATE="$lib/steamapps/compatdata/$APPID"
+        if [ -d "$CANDIDATE" ]; then
+            COMPAT_DATA="$CANDIDATE"
+            break
+        fi
+    done
+
+    COMPAT_DATA="${COMPAT_DATA:-$STEAM_PATH/steamapps/compatdata/$APPID}"
+fi
 
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_PATH"
 export STEAM_COMPAT_DATA_PATH="$COMPAT_DATA"
