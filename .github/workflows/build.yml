@@ -10,32 +10,35 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
-      
+
     - name: Install MinGW-w64
       run: |
         sudo apt-get update
         sudo apt-get install -y mingw-w64 make
-        
-    - name: Build injector
+
+    - name: Build injector (32-bit and 64-bit)
       run: make clean && make
-      
+
     - name: Build example DLL
       run: cd example && make
-      
+
     - name: Create release package
       run: |
-        mkdir -p release
-        cp bin/injector.exe release/
+        mkdir -p release/bin release/scripts
+        cp bin/injector32.exe release/bin/
+        cp bin/injector64.exe release/bin/
         cp example/test.dll release/
         cp README.md release/
         cp LICENSE release/
-        cp scripts/inject.sh release/
-        chmod +x release/inject.sh
-        
+        cp scripts/inject.sh release/scripts/
+        cp scripts/umu.sh release/scripts/
+        cp scripts/gui.sh release/scripts/
+        chmod +x release/scripts/*.sh
+
     - name: Upload artifact
       uses: actions/upload-artifact@v6
       with:
