@@ -3,7 +3,7 @@
 [![Build](https://github.com/jokelbaf/proton-injector/actions/workflows/build.yml/badge.svg)](https://github.com/jokelbaf/proton-injector/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A DLL injector for Windows executables running under Proton with support for multiple injection methods.
+A DLL injector for Windows executables running under Proton/Wine on Linux. Supports both 32-bit and 64-bit targets, multiple injection methods, and Steam runtime integration for games that use the Steam API.
 
 ## Download
 
@@ -11,214 +11,125 @@ A DLL injector for Windows executables running under Proton with support for mul
 
 ## Features
 
-- Multiple injection methods: Standard, APC, NT, and Hook
-- Command-line interface
-- Detailed logging support
-- Proton compatibility for Linux gaming
-- Clean, well-structured C codebase
-- Process suspension for reliable injection
+- 32-bit and 64-bit injection
+- Four injection methods: Standard, APC, NT, Hook
+- Multi-step injection with automatic fallbacks (PEB walk, VM query, toolhelp)
+- Steam runtime integration (reaper/launch wrapper) for Steam API authentication
+- umu-run support for non-Steam games
+- Zenity-based GUI for both Steam and non-Steam workflows
+- Process suspension during injection for reliability
+- Detailed logging
 
 ## Injection Methods
 
-The injector supports four different injection techniques:
+| Method | Function | Stealth | Compatibility |
+|--------|----------|---------|---------------|
+| `standard` | CreateRemoteThread | Low | Highest |
+| `apc` | QueueUserAPC | Medium | High |
+| `nt` | NtCreateThreadEx | High | High |
+| `hook` | SetWindowsHookExA | High | Medium |
 
-| Method | Description | Stealthiness | Compatibility |
-|--------|-------------|--------------|---------------|
-| **standard** | CreateRemoteThread + LoadLibraryW | Low | Highest |
-| **apc** | QueueUserAPC + LoadLibraryA | Medium | High |
-| **nt** | NtCreateThreadEx + LoadLibraryA | High | High |
-| **hook** | SetWindowsHookExA (WH_CBT) | High | Medium |
-
-### Method Details
-
-- **Standard**: Traditional injection using `CreateRemoteThread`. Most compatible but easily detected.
-- **APC**: Queues an Asynchronous Procedure Call to the main thread. More stealthy than standard.
-- **NT**: Uses undocumented `NtCreateThreadEx` from ntdll.dll. More stealthy, lower-level approach.
-- **Hook**: Installs a Windows hook in the target process. Stealthiest but may have compatibility issues with some games.
+All methods use `LdrLoadDll` with custom shellcode rather than plain `LoadLibrary` calls. Module resolution in the target process goes through three stages: PEB walk, virtual memory query (`NtQueryVirtualMemory`), and toolhelp snapshot, falling back automatically if earlier methods fail.
 
 ## Building
 
-### Requirements
+Requires MinGW-w64 cross-compilers and `make`.
 
-- `x86_64-w64-mingw32-gcc` (MinGW-w64 cross-compiler)
-- `make`
-
-Install on Ubuntu/Debian:
 ```bash
+# Ubuntu/Debian
 sudo apt install mingw-w64 make
-```
 
-Install on Arch Linux:
-```bash
+# Arch Linux
 sudo pacman -S mingw-w64-gcc make
 ```
 
-### Compilation
-
 ```bash
-make clean && make
+make
 ```
 
-The compiled executable will be available at `bin/injector.exe`.
-
-To build the example test DLL:
-```bash
-cd example && make
-```
+Produces `bin/injector32.exe` and `bin/injector64.exe`. The correct binary is selected automatically by the helper scripts based on the target executable.
 
 ## Usage
 
-### Quick Start with Helper Script
+### GUI
 
-The easiest way to use the injector is with the provided helper script:
+The GUI requires [Zenity](https://gitlab.gnome.org/GNOME/zenity). It auto-detects Steam libraries, installed games, and available Proton versions.
 
 ```bash
-# Basic usage (uses standard injection method by default)
-./scripts/inject.sh /path/to/game.exe /path/to/your.dll
-
-# With specific injection method
-./scripts/inject.sh /path/to/game.exe /path/to/your.dll --method apc
-
-# With custom App ID
-APPID=12345 ./scripts/inject.sh /path/to/game.exe /path/to/your.dll --method nt
-
-# Full example with all options
-APPID=0 PROTON_PATH=proton-ge ./scripts/inject.sh \
-    "$HOME/.local/share/Steam/steamapps/common/YourGame/game.exe" \
-    "$HOME/.local/share/Steam/steamapps/common/YourGame/your_mod.dll" \
-    --method apc
+./scripts/gui.sh
 ```
+
+Select "Steam Game" for games with Steam API, or "Non-steam Game" for anything else (requires [umu-run](https://github.com/Open-Wine-Components/umu-launcher)).
+
+### Steam Games (`inject.sh`)
+
+For games installed through Steam. Handles compatdata detection across multiple Steam library folders, sets up Steam environment variables, and wraps the launch with Steam's `reaper` for proper API authentication.
+
+```bash
+APPID=945360 ./scripts/inject.sh \
+    "$HOME/.local/share/Steam/steamapps/common/Among Us/Among Us.exe" \
+    /path/to/your.dll
+
+# With custom Proton path and injection method
+APPID=945360 PROTON_PATH=/path/to/GE-Proton/proton ./scripts/inject.sh \
+    /path/to/game.exe /path/to/mod.dll --method apc
+```
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `APPID` | Steam App ID | `0` |
+| `PROTON_PATH` | Path to Proton executable | `proton-ge` |
+| `STEAM_COMPAT_CLIENT_INSTALL_PATH` | Steam installation path | Auto-detected |
+| `STEAM_COMPAT_DATA_PATH` | Proton compatdata path | Auto-detected from `APPID` |
+
+### Non-Steam Games (`umu.sh`)
+
+For games outside of Steam, [umu-run](https://github.com/Open-Wine-Components/umu-launcher) is used to manage the Proton runtime.
+
+```bash
+PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
+    /path/to/game.exe /path/to/mod.dll
+
+# With custom Wine prefix
+PROTONPATH=/path/to/GE-Proton WINEPREFIX=~/.my-prefix ./scripts/umu.sh \
+    /path/to/game.exe /path/to/mod.dll --method nt
+```
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PROTONPATH` | Path to Proton directory (required) | - |
+| `WINEPREFIX` | Wine prefix path | `~/.proton-injector/pfx` |
+| `GAMEID` | Game ID for umu-run | `0` |
 
 ### Direct Usage
 
 ```bash
-injector.exe <target.exe> <dll.dll> [options]
+# Inside a Proton/Wine environment
+injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" --method apc --log-file "Z:\path\to\injector.log"
 ```
 
-#### Options
-
-- `--method <type>` - Injection method: `standard`, `apc`, `nt`, or `hook` (default: `standard`)
-- `--log-file <path>` - Path to log file for detailed injection logs
-
-### Example with Proton
-
-If you prefer to run manually without the script:
-
-```bash
-export APPID=0
-export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
-export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/$APPID"
-export PROTON_LOG=1
-
-proton-ge run \
-    "Z:\home\user\proton-injector\bin\injector.exe" \
-    "Z:\path\to\game.exe" \
-    "Z:\path\to\your.dll" \
-    --method apc \
-    --log-file "Z:\home\user\proton-injector\injector.log"
-```
-
-**Note**: Convert all Linux paths to Windows Z: paths when using Proton directly.
-
-### Environment Variables
-
-- `APPID` - Steam App ID (default: 0)
-- `STEAM_COMPAT_CLIENT_INSTALL_PATH` - Steam installation path
-- `STEAM_COMPAT_DATA_PATH` - Proton compatdata path
-- `PROTON_PATH` - Path to Proton executable (default: `proton-ge`)
+Options:
+- `--method <type>` -- Injection method: `standard`, `apc`, `nt`, `hook` (default: `standard`)
+- `--log-file <path>` -- Log file path (Windows-style Z: paths when under Proton)
 
 ## How It Works
 
-1. Creates the target process in suspended state
-2. Allocates memory in the target process for the DLL path
-3. Writes the DLL path to the allocated memory
-4. Executes injection using the selected method:
-   - Standard: Creates remote thread calling LoadLibraryW
-   - APC: Queues APC to main thread with LoadLibraryA
-   - NT: Uses NtCreateThreadEx to create thread with LoadLibraryA
-   - Hook: Installs Windows hook to trigger DLL load
-5. Waits for DLL to load and verifies success
-6. Resumes the main thread
-7. Waits for the process to exit
+1. Creates the target process in a suspended state
+2. Waits for `kernel32.dll` to load in the target (PEB polling)
+3. Resolves `LdrLoadDll` in the remote process via multi-step module lookup
+4. Writes position-independent shellcode + data block to the target
+5. Executes injection using the selected method
+6. Resumes the process and waits for exit
 
-## Logging
+## Acknowledgements
 
-When a log file is specified with `--log-file`, the injector writes detailed logs including:
-
-- Timestamps for all operations
-- Selected injection method
-- Process creation details (PID)
-- Memory allocation addresses
-- Function addresses (LoadLibrary, NtCreateThreadEx, etc.)
-- DLL load address on success
-- Error messages with error codes
-
-Example log output:
-```
-[2025-12-18 10:30:45] INFO: Proton DLL Injector v1.0.0
-[2025-12-18 10:30:45] INFO: Using injection method: 1
-[2025-12-18 10:30:45] INFO: Process created (PID: 12345)
-[2025-12-18 10:30:45] DEBUG: Allocated memory at 0x00007FF8A0000000
-[2025-12-18 10:30:45] DEBUG: DLL loaded at 0x00007FF8B0000000
-```
-
-## Project Structure
-
-```
-proton-injector/
-├── src/
-│   ├── main.c       - Entry point and CLI parsing
-│   ├── inject.c     - DLL injection logic
-│   └── logger.c     - Logging functionality
-├── include/
-│   ├── inject.h     - Injection function declarations
-│   └── logger.h     - Logger function declarations
-├── example/
-│   ├── test_dll.c   - Example DLL source
-│   └── test.dll     - Compiled example DLL
-├── scripts/
-│   └── inject.sh    - Helper script for easy injection
-├── bin/             - Compiled executables
-├── build/           - Object files
-├── Makefile         - Build configuration
-└── README.md        - This file
-```
-
-## Testing
-
-A simple test DLL is provided in the `example/` directory:
-
-```bash
-# Build the test DLL
-cd example && make
-
-# Test injection with different methods
-./scripts/inject.sh /path/to/notepad.exe ./example/test.dll --method standard
-./scripts/inject.sh /path/to/notepad.exe ./example/test.dll --method apc
-./scripts/inject.sh /path/to/notepad.exe ./example/test.dll --method nt
-./scripts/inject.sh /path/to/notepad.exe ./example/test.dll --method hook
-```
-
-The test DLL will display a message box when successfully injected.
-
-## Troubleshooting
-
-**Injection fails with standard method**  
-Try `apc` or `nt` method. Some anti-cheat systems detect CreateRemoteThread. Verify that the DLL architecture matches the target executable.
-
-**DLL not loading**  
-Check the DLL path and verify all dependencies are available. Enable logging for detailed error messages.
-
-**Process crashes after injection**  
-The DLL may have initialization issues. Try different injection methods and check logs.
-
-**Hook method not working**  
-Hook injection requires a Windows message loop. Try `apc` or `nt` methods instead.
+Special thanks to the following people for their contributions:
+- [CrayzyEyezz](https://github.com/CrayzyEyezz) for the GUI design and help with testing.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Disclaimer
 
-This tool is for educational purposes. Use responsibly and only with software you have the right to modify.
+This tool is intended for educational purposes and legitimate modding. Use responsibly and only with software you have the right to modify.
