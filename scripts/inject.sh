@@ -56,6 +56,7 @@ if [ $# -lt 2 ]; then
     echo "  STEAM_COMPAT_CLIENT_INSTALL_PATH     - Steam installation path"
     echo "  STEAM_COMPAT_DATA_PATH               - Proton compatdata path"
     echo "  PROTON_PATH                          - Path to Proton (e.g., proton-ge)"
+    echo "  SLEEP                                - Delay before injection in ms (default: 0)"
     exit 1
 fi
 
@@ -124,6 +125,7 @@ echo "  Proton:     $PROTON"
 echo "  App ID:     $APPID"
 echo "  Arch:       $TARGET_ARCH"
 echo "  Method:     $METHOD_DISPLAY"
+echo "  Sleep:      ${SLEEP:-0} ms"
 echo ""
 echo "  Target:     $TARGET_EXE"
 echo "  DLL:        $DLL_PATH"
@@ -132,7 +134,12 @@ echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
 echo ""
 
-PROTON_CMD=("$PROTON" waitforexitandrun "$WIN_INJECTOR" "$WIN_TARGET" "$WIN_DLL" --log-file "$WIN_LOG" "$@")
+SLEEP_ARGS=()
+if [ -n "${SLEEP:-}" ] && [ "$SLEEP" != "0" ]; then
+    SLEEP_ARGS=(--sleep "$SLEEP")
+fi
+
+PROTON_CMD=("$PROTON" waitforexitandrun "$WIN_INJECTOR" "$WIN_TARGET" "$WIN_DLL" --log-file "$WIN_LOG" "${SLEEP_ARGS[@]}" "$@")
 
 if [ "${APPID}" != "0" ] && [ -n "${APPID}" ] && [ -x "$STEAM_LAUNCHER" ] && [ -x "$STEAM_REAPER" ]; then
     "$STEAM_LAUNCHER" -- "$STEAM_REAPER" SteamLaunch AppId="$APPID" -- "${PROTON_CMD[@]}"

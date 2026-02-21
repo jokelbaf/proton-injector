@@ -127,6 +127,13 @@ select_method() {
     [ -z "$METHOD" ] && exit 0
 }
 
+select_sleep() {
+    SLEEP=$(zenity --entry --title="Injection Delay" \
+        --text="Delay before injection in milliseconds (0 for none):" \
+        --entry-text="0")
+    [ -z "$SLEEP" ] && SLEEP=0
+}
+
 select_wineprefix() {
     local default_prefix="$HOME/.proton-injector/pfx"
     mkdir -p "$default_prefix"
@@ -139,12 +146,14 @@ select_wineprefix() {
 run_steam() {
     APPID="$APPID" \
     PROTON_PATH="$PROTON_PATH" \
+    SLEEP="$SLEEP" \
         "$INJECT_SCRIPT" "$EXE_PATH" "$DLL_PATH" --method "$METHOD"
 }
 
 run_nonsteam() {
     PROTONPATH="$(dirname "$PROTON_PATH")" \
     WINEPREFIX="$WINEPREFIX" \
+    SLEEP="$SLEEP" \
         "$UMU_SCRIPT" "$EXE_PATH" "$DLL_PATH" --method "$METHOD"
 }
 
@@ -159,6 +168,7 @@ case "$MODE" in
         select_exe
         select_dll
         select_method
+        select_sleep
         run_steam
         ;;
     "Non-steam Game"*)
@@ -171,6 +181,7 @@ case "$MODE" in
         select_exe
         select_dll
         select_method
+        select_sleep
         run_nonsteam
         ;;
 esac

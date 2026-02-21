@@ -11,6 +11,7 @@ typedef struct {
     wchar_t *dll_path;
     wchar_t *log_file;
     InjectionMethod method;
+    DWORD sleep_ms;
 } Arguments;
 
 static void print_usage(const wchar_t *program_name) {
@@ -21,7 +22,8 @@ static void print_usage(const wchar_t *program_name) {
     wprintf(L"  dll.dll          Path to the DLL to inject\n\n");
     wprintf(L"Options:\n");
     wprintf(L"  --method <type>  Injection method (standard, apc, nt, hook) [default: standard]\n");
-    wprintf(L"  --log-file <path> Log file path\n\n");
+    wprintf(L"  --log-file <path> Log file path\n");
+    wprintf(L"  --sleep <ms>     Delay in milliseconds before injection [default: 0]\n\n");
     wprintf(L"Example:\n");
     wprintf(L"  %ls \"Z:\\path\\to\\game.exe\" \"Z:\\path\\to\\mod.dll\" --method apc --log-file \"injector.log\"\n", program_name);
 }
@@ -34,10 +36,13 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
     args->dll_path = argv[2];
     args->log_file = NULL;
     args->method = INJECTION_STANDARD;
+    args->sleep_ms = 0;
 
     for (int i = 3; i < argc; i++) {
         if (wcscmp(argv[i], L"--log-file") == 0 && i + 1 < argc) {
             args->log_file = argv[++i];
+        } else if (wcscmp(argv[i], L"--sleep") == 0 && i + 1 < argc) {
+            args->sleep_ms = (DWORD)wcstoul(argv[++i], NULL, 10);
         } else if (wcscmp(argv[i], L"--method") == 0 && i + 1 < argc) {
             wchar_t *method = argv[++i];
             if (wcscmp(method, L"standard") == 0)
@@ -125,6 +130,11 @@ int wmain(int argc, wchar_t **argv) {
     ResumeThread(pi.hThread);
     wait_for_process_init(pi.hProcess, 10000);
     LOG_INFO(L"Process ready");
+
+    if (args.sleep_ms > 0) {
+        LOG_INFO(L"Sleeping for %lu ms before injection...", args.sleep_ms);
+        Sleep(args.sleep_ms);
+    }
 
     LOG_INFO(L"Injecting DLL...");
 

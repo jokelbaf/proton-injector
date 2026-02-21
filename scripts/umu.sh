@@ -10,6 +10,7 @@ if [ $# -lt 2 ]; then
     echo "  PROTONPATH   - Path to Proton directory (required)"
     echo "  WINEPREFIX   - Wine prefix path (default: ~/.proton-injector/pfx)"
     echo "  GAMEID       - Game ID for umu-run (default: 0)"
+    echo "  SLEEP        - Delay before injection in ms (default: 0)"
     exit 1
 fi
 
@@ -89,6 +90,7 @@ echo "  Proton:     $PROTONPATH"
 echo "  Prefix:     $WINEPREFIX"
 echo "  Arch:       $TARGET_ARCH"
 echo "  Method:     $METHOD_DISPLAY"
+echo "  Sleep:      ${SLEEP:-0} ms"
 echo ""
 echo "  Target:     $TARGET_EXE"
 echo "  DLL:        $DLL_PATH"
@@ -97,11 +99,17 @@ echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
 echo ""
 
+SLEEP_ARGS=()
+if [ -n "${SLEEP:-}" ] && [ "$SLEEP" != "0" ]; then
+    SLEEP_ARGS=(--sleep "$SLEEP")
+fi
+
 umu-run \
     "$INJECTOR_EXE" \
     "$WIN_TARGET" \
     "$WIN_DLL" \
     --log-file "$WIN_LOG" \
+    "${SLEEP_ARGS[@]}" \
     "$@"
 
 echo ""
