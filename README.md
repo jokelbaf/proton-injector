@@ -81,6 +81,7 @@ APPID=945360 PROTON_PATH=/path/to/GE-Proton/proton ./scripts/inject.sh \
 | `PROTON_PATH` | Path to Proton executable | `proton-ge` |
 | `STEAM_COMPAT_CLIENT_INSTALL_PATH` | Steam installation path | Auto-detected |
 | `STEAM_COMPAT_DATA_PATH` | Proton compatdata path | Auto-detected from `APPID` |
+| `SLEEP` | Delay before injection in ms | `0` |
 
 ### Non-Steam Games (`umu.sh`)
 
@@ -100,6 +101,7 @@ PROTONPATH=/path/to/GE-Proton WINEPREFIX=~/.my-prefix ./scripts/umu.sh \
 | `PROTONPATH` | Path to Proton directory (required) | - |
 | `WINEPREFIX` | Wine prefix path | `~/.proton-injector/pfx` |
 | `GAMEID` | Game ID for umu-run | `0` |
+| `SLEEP` | Delay before injection in ms | `0` |
 
 ### Direct Usage
 
@@ -111,6 +113,7 @@ injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" --method apc --log-fil
 Options:
 - `--method <type>` -- Injection method: `standard`, `apc`, `nt`, `hook` (default: `standard`)
 - `--log-file <path>` -- Log file path (Windows-style Z: paths when under Proton)
+- `--sleep <ms>` -- Delay in milliseconds before injection (default: `0`)
 
 ## How It Works
 
