@@ -347,112 +347,50 @@ BOOL wait_for_process_init(HANDLE process, int timeout_ms) {
     return FALSE;
 }
 
-
-#define LDR_DATA_FUNC_PTR    0
-#define LDR_DATA_UNICODE_STR (sizeof(UINT_PTR))
-#define LDR_DATA_HMODULE     (sizeof(UINT_PTR) + sizeof(MY_UNICODE_STRING))
-#define LDR_DATA_DLL_PATH    (2 * sizeof(UINT_PTR) + sizeof(MY_UNICODE_STRING))
-
-static BOOL prepare_ldr_injection(HANDLE process, const wchar_t *dll_path,
-                                   LPVOID *out_entry, LPVOID *out_param,
-                                   LPVOID *out_alloc_base) {
-    FARPROC ldr_load_dll = get_remote_proc_address(process, L"ntdll.dll", "LdrLoadDll");
-    if (!ldr_load_dll) {
-        LOG_ERROR(L"Failed to resolve LdrLoadDll in target process");
+static BOOL prepare_loadlibrary_injection(HANDLE process, const wchar_t *dll_path,
+                                          FARPROC *out_load_lib, LPVOID *out_remote_path) {
+    FARPROC load_lib = get_remote_proc_address(process, L"kernel32.dll", "LoadLibraryA");
+    if (!load_lib) {
+        LOG_ERROR(L"Failed to resolve LoadLibraryA in target process");
         return FALSE;
     }
 
-#ifdef _WIN64
-    static const BYTE shellcode[] = {
-        0x53,                           /* push rbx              */
-        0x48, 0x83, 0xEC, 0x20,        /* sub  rsp, 0x20        */
-        0x48, 0x89, 0xCB,              /* mov  rbx, rcx         */
-        0x31, 0xC9,                     /* xor  ecx, ecx         */
-        0x31, 0xD2,                     /* xor  edx, edx         */
-        0x4C, 0x8D, 0x43, 0x08,        /* lea  r8,  [rbx+0x08]  */
-        0x4C, 0x8D, 0x4B, 0x18,        /* lea  r9,  [rbx+0x18]  */
-        0xFF, 0x13,                     /* call [rbx]            */
-        0x48, 0x83, 0xC4, 0x20,        /* add  rsp, 0x20        */
-        0x5B,                           /* pop  rbx              */
-        0xC3                            /* ret                   */
-    };
-#else
-    static const BYTE shellcode[] = {
-        0x55,                           /* push ebp              */
-        0x8B, 0xEC,                     /* mov  ebp, esp         */
-        0x8B, 0x45, 0x08,              /* mov  eax, [ebp+8]     */
-        0x8D, 0x48, 0x0C,              /* lea  ecx, [eax+0x0C]  */
-        0x8D, 0x50, 0x04,              /* lea  edx, [eax+0x04]  */
-        0x51,                           /* push ecx              */
-        0x52,                           /* push edx              */
-        0x6A, 0x00,                     /* push 0                */
-        0x6A, 0x00,                     /* push 0                */
-        0xFF, 0x10,                     /* call [eax]            */
-        0x5D,                           /* pop  ebp              */
-        0xC2, 0x04, 0x00               /* ret  4                */
-    };
-#endif
+    char path_ansi[MAX_PATH];
+    WideCharToMultiByte(CP_ACP, 0, dll_path, -1, path_ansi, MAX_PATH, NULL, NULL);
+    SIZE_T path_size = strlen(path_ansi) + 1;
 
-    SIZE_T dll_path_len = wcslen(dll_path);
-    SIZE_T dll_path_bytes = (dll_path_len + 1) * sizeof(wchar_t);
-    SIZE_T shellcode_aligned = (sizeof(shellcode) + 15) & ~(SIZE_T)15;
-    SIZE_T data_size = LDR_DATA_DLL_PATH + dll_path_bytes;
-    SIZE_T total_size = shellcode_aligned + data_size;
-
-    LPVOID remote_mem = VirtualAllocEx(process, NULL, total_size,
-                                        MEM_COMMIT | MEM_RESERVE,
-                                        PAGE_EXECUTE_READWRITE);
-    if (!remote_mem) {
+    LPVOID remote_path = VirtualAllocEx(process, NULL, path_size,
+                                        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remote_path) {
         LOG_ERROR(L"VirtualAllocEx failed: %lu", GetLastError());
         return FALSE;
     }
 
-    BYTE *data_remote_addr = (BYTE*)remote_mem + shellcode_aligned;
-
-    BYTE *data_block = (BYTE*)calloc(1, data_size);
-    if (!data_block) {
-        VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE);
+    if (!WriteProcessMemory(process, remote_path, path_ansi, path_size, NULL)) {
+        LOG_ERROR(L"WriteProcessMemory failed: %lu", GetLastError());
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
-    *(UINT_PTR*)(data_block + LDR_DATA_FUNC_PTR) = (UINT_PTR)ldr_load_dll;
-    *(USHORT*)(data_block + LDR_DATA_UNICODE_STR + 0) = (USHORT)(dll_path_len * sizeof(wchar_t));
-    *(USHORT*)(data_block + LDR_DATA_UNICODE_STR + 2) = (USHORT)dll_path_bytes;
-    *(UINT_PTR*)(data_block + LDR_DATA_UNICODE_STR + offsetof(MY_UNICODE_STRING, Buffer)) =
-        (UINT_PTR)(data_remote_addr + LDR_DATA_DLL_PATH);
-    memcpy(data_block + LDR_DATA_DLL_PATH, dll_path, dll_path_bytes);
+    *out_load_lib  = load_lib;
+    *out_remote_path = remote_path;
 
-    BOOL ok = WriteProcessMemory(process, remote_mem, shellcode, sizeof(shellcode), NULL) &&
-              WriteProcessMemory(process, data_remote_addr, data_block, data_size, NULL);
-    free(data_block);
-
-    if (!ok) {
-        LOG_ERROR(L"Failed to write shellcode/data: %lu", GetLastError());
-        VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE);
-        return FALSE;
-    }
-
-    FlushInstructionCache(process, remote_mem, total_size);
-
-    *out_entry = remote_mem;
-    *out_param = data_remote_addr;
-    *out_alloc_base = remote_mem;
-
-    LOG_DEBUG(L"LdrLoadDll shellcode at 0x%p, data at 0x%p", remote_mem, data_remote_addr);
+    LOG_DEBUG(L"LoadLibraryA at 0x%p, path at 0x%p", load_lib, remote_path);
     return TRUE;
 }
 
 static BOOL inject_standard(HANDLE process, const wchar_t *dll_path) {
-    LPVOID entry = NULL, param = NULL, alloc_base = NULL;
-    if (!prepare_ldr_injection(process, dll_path, &entry, &param, &alloc_base))
+    FARPROC load_lib   = NULL;
+    LPVOID  remote_path = NULL;
+    if (!prepare_loadlibrary_injection(process, dll_path, &load_lib, &remote_path))
         return FALSE;
 
     HANDLE thread = CreateRemoteThread(process, NULL, 0,
-                                        (LPTHREAD_START_ROUTINE)entry,
-                                        param, 0, NULL);
+                                       (LPTHREAD_START_ROUTINE)load_lib,
+                                       remote_path, 0, NULL);
     if (!thread) {
         LOG_ERROR(L"CreateRemoteThread failed: %lu", GetLastError());
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
@@ -461,43 +399,45 @@ static BOOL inject_standard(HANDLE process, const wchar_t *dll_path) {
     DWORD exit_code;
     GetExitCodeThread(thread, &exit_code);
     CloseHandle(thread);
+    VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
 
-    if (exit_code != 0) {
-        LOG_ERROR(L"LdrLoadDll failed: NTSTATUS 0x%08X", exit_code);
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+    if (!exit_code) {
+        LOG_ERROR(L"LoadLibraryA returned NULL");
         return FALSE;
     }
 
-    LOG_DEBUG(L"DLL loaded via CreateRemoteThread + LdrLoadDll");
+    LOG_DEBUG(L"DLL loaded via CreateRemoteThread + LoadLibraryA");
     return TRUE;
 }
 
 static BOOL inject_apc(HANDLE process, HANDLE thread, const wchar_t *dll_path) {
-    LPVOID entry = NULL, param = NULL, alloc_base = NULL;
-    if (!prepare_ldr_injection(process, dll_path, &entry, &param, &alloc_base))
+    FARPROC load_lib   = NULL;
+    LPVOID  remote_path = NULL;
+    if (!prepare_loadlibrary_injection(process, dll_path, &load_lib, &remote_path))
         return FALSE;
 
     SuspendThread(thread);
 
-    if (!QueueUserAPC((PAPCFUNC)entry, thread, (ULONG_PTR)param)) {
+    if (!QueueUserAPC((PAPCFUNC)load_lib, thread, (ULONG_PTR)remote_path)) {
         LOG_ERROR(L"QueueUserAPC failed: %lu", GetLastError());
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
-    LOG_DEBUG(L"APC queued (LdrLoadDll shellcode)");
+    LOG_DEBUG(L"APC queued (LoadLibraryA)");
     return TRUE;
 }
 
 static BOOL inject_nt(HANDLE process, const wchar_t *dll_path) {
-    LPVOID entry = NULL, param = NULL, alloc_base = NULL;
-    if (!prepare_ldr_injection(process, dll_path, &entry, &param, &alloc_base))
+    FARPROC load_lib   = NULL;
+    LPVOID  remote_path = NULL;
+    if (!prepare_loadlibrary_injection(process, dll_path, &load_lib, &remote_path))
         return FALSE;
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) {
         LOG_ERROR(L"Failed to get ntdll.dll handle");
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
@@ -505,32 +445,32 @@ static BOOL inject_nt(HANDLE process, const wchar_t *dll_path) {
         (NtCreateThreadEx_t)GetProcAddress(ntdll, "NtCreateThreadEx");
     if (!NtCreateThreadEx) {
         LOG_ERROR(L"NtCreateThreadEx not available");
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
-    HANDLE thread = NULL;
-    NTSTATUS status = NtCreateThreadEx(&thread, THREAD_ALL_ACCESS, NULL, process,
-                                        entry, param, 0, 0, 0, 0, NULL);
-    if (status != 0 || !thread) {
+    HANDLE remote_thread = NULL;
+    NTSTATUS status = NtCreateThreadEx(&remote_thread, THREAD_ALL_ACCESS, NULL, process,
+                                       load_lib, remote_path, 0, 0, 0, 0, NULL);
+    if (status != 0 || !remote_thread) {
         LOG_ERROR(L"NtCreateThreadEx failed: 0x%08X", status);
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return FALSE;
     }
 
-    WaitForSingleObject(thread, INFINITE);
+    WaitForSingleObject(remote_thread, INFINITE);
 
     DWORD exit_code;
-    GetExitCodeThread(thread, &exit_code);
-    CloseHandle(thread);
+    GetExitCodeThread(remote_thread, &exit_code);
+    CloseHandle(remote_thread);
+    VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
 
-    if (exit_code != 0) {
-        LOG_ERROR(L"LdrLoadDll failed: NTSTATUS 0x%08X", exit_code);
-        VirtualFreeEx(process, alloc_base, 0, MEM_RELEASE);
+    if (!exit_code) {
+        LOG_ERROR(L"LoadLibraryA returned NULL");
         return FALSE;
     }
 
-    LOG_DEBUG(L"DLL loaded via NtCreateThreadEx + LdrLoadDll");
+    LOG_DEBUG(L"DLL loaded via NtCreateThreadEx + LoadLibraryA");
     return TRUE;
 }
 
