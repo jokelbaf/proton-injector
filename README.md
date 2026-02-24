@@ -29,7 +29,7 @@ A DLL injector for Windows executables running under Proton/Wine on Linux. Suppo
 | `nt` | NtCreateThreadEx | High | High |
 | `hook` | SetWindowsHookExA | High | Medium |
 
-All methods use `LdrLoadDll` with custom shellcode rather than plain `LoadLibrary` calls. Module resolution in the target process goes through three stages: PEB walk, virtual memory query (`NtQueryVirtualMemory`), and toolhelp snapshot, falling back automatically if earlier methods fail.
+All methods use `LoadLibraryA` from `kernel32.dll`. The address of `LoadLibraryA` is resolved in the target process rather than assumed from the injector's own address space; module resolution goes through three stages: PEB walk, virtual memory query (`NtQueryVirtualMemory`), and toolhelp snapshot, falling back automatically if earlier methods fail.
 
 ## Building
 
@@ -119,8 +119,8 @@ Options:
 
 1. Creates the target process in a suspended state
 2. Waits for `kernel32.dll` to load in the target (PEB polling)
-3. Resolves `LdrLoadDll` in the remote process via multi-step module lookup
-4. Writes position-independent shellcode + data block to the target
+3. Resolves `LoadLibraryA` in the remote `kernel32.dll` via multi-step module lookup (PEB walk -> VM query -> toolhelp)
+4. Writes the DLL path into the target process's memory
 5. Executes injection using the selected method
 6. Resumes the process and waits for exit
 
