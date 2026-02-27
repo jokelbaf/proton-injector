@@ -9,5 +9,6 @@ typedef enum {
     INJECTION_HOOK
 } InjectionMethod;
 
-BOOL wait_for_process_init(HANDLE process, int timeout_ms);
-BOOL inject_dll(HANDLE process, HANDLE thread, DWORD pid, const wchar_t *dll_path, InjectionMethod method);
+BOOL  wait_for_process_init(HANDLE process, int timeout_ms);
+BOOL  inject_dll(HANDLE process, HANDLE thread, DWORD pid, const wchar_t *dll_path, InjectionMethod method);
+DWORD find_process_main_thread(DWORD pid);

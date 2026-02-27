@@ -474,7 +474,7 @@ static BOOL inject_nt(HANDLE process, const wchar_t *dll_path) {
     return TRUE;
 }
 
-static DWORD find_main_thread(DWORD pid) {
+DWORD find_process_main_thread(DWORD pid) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return 0;
 
@@ -515,7 +515,7 @@ static BOOL inject_hook(DWORD pid, const wchar_t *dll_path) {
         return FALSE;
     }
 
-    DWORD main_thread_id = find_main_thread(pid);
+    DWORD main_thread_id = find_process_main_thread(pid);
     if (!main_thread_id) {
         LOG_ERROR(L"Failed to find main thread");
         FreeLibrary(dll);

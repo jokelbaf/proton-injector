@@ -127,11 +127,29 @@ select_method() {
     [ -z "$METHOD" ] && exit 0
 }
 
-select_sleep() {
-    SLEEP=$(zenity --entry --title="Injection Delay" \
-        --text="Delay before injection in milliseconds (0 for none):" \
-        --entry-text="0")
+select_advanced_options() {
+    RESULT=$(zenity --forms \
+        --title="Injection Options" \
+        --text="Configure injection options:" \
+        --add-entry="Delay before injection (ms):" \
+        --add-check="Skip parent injection (inject into child process instead)" \
+        --add-check="Follow process (inject into child when parent exits with code 0)" \
+        --add-entry="Follow process name (optional, leave empty for auto-select):" \
+        --width=500 \
+        2>/dev/null)
+
+    if [ $? -ne 0 ]; then
+        SLEEP=0
+        NO_PARENT=false
+        FOLLOW_PROCESS=false
+        FOLLOW_PROCESS_NAME=""
+        return
+    fi
+
+    IFS='|' read -r SLEEP NO_PARENT_RAW FOLLOW_PROCESS_RAW FOLLOW_PROCESS_NAME <<< "$RESULT"
     [ -z "$SLEEP" ] && SLEEP=0
+    [ "$NO_PARENT_RAW" = "TRUE" ]      && NO_PARENT=true      || NO_PARENT=false
+    [ "$FOLLOW_PROCESS_RAW" = "TRUE" ] && FOLLOW_PROCESS=true || FOLLOW_PROCESS=false
 }
 
 select_wineprefix() {
@@ -147,6 +165,9 @@ run_steam() {
     APPID="$APPID" \
     PROTON_PATH="$PROTON_PATH" \
     SLEEP="$SLEEP" \
+    NO_PARENT="$NO_PARENT" \
+    FOLLOW_PROCESS="$FOLLOW_PROCESS" \
+    FOLLOW_PROCESS_NAME="$FOLLOW_PROCESS_NAME" \
         "$INJECT_SCRIPT" "$EXE_PATH" "$DLL_PATH" --method "$METHOD"
 }
 
@@ -154,6 +175,9 @@ run_nonsteam() {
     PROTONPATH="$(dirname "$PROTON_PATH")" \
     WINEPREFIX="$WINEPREFIX" \
     SLEEP="$SLEEP" \
+    NO_PARENT="$NO_PARENT" \
+    FOLLOW_PROCESS="$FOLLOW_PROCESS" \
+    FOLLOW_PROCESS_NAME="$FOLLOW_PROCESS_NAME" \
         "$UMU_SCRIPT" "$EXE_PATH" "$DLL_PATH" --method "$METHOD"
 }
 
@@ -168,7 +192,7 @@ case "$MODE" in
         select_exe
         select_dll
         select_method
-        select_sleep
+        select_advanced_options
         run_steam
         ;;
     "Non-steam Game"*)
@@ -181,7 +205,7 @@ case "$MODE" in
         select_exe
         select_dll
         select_method
-        select_sleep
+        select_advanced_options
         run_nonsteam
         ;;
 esac

@@ -7,10 +7,13 @@ if [ $# -lt 2 ]; then
     echo "Usage: $0 <target.exe> <dll.dll> [additional args...]"
     echo ""
     echo "Environment variables:"
-    echo "  PROTONPATH   - Path to Proton directory (required)"
-    echo "  WINEPREFIX   - Wine prefix path (default: ~/.proton-injector/pfx)"
-    echo "  GAMEID       - Game ID for umu-run (default: 0)"
-    echo "  SLEEP        - Delay before injection in ms (default: 0)"
+    echo "  PROTONPATH           - Path to Proton directory (required)"
+    echo "  WINEPREFIX           - Wine prefix path (default: ~/.proton-injector/pfx)"
+    echo "  GAMEID               - Game ID for umu-run (default: 0)"
+    echo "  SLEEP                - Delay before injection in ms (default: 0)"
+    echo "  FOLLOW_PROCESS       - Inject into child process when parent exits with 0 (default: false)"
+    echo "  FOLLOW_PROCESS_NAME  - Preferred child process executable name (optional)"
+    echo "  NO_PARENT            - Skip parent injection; inject into child process instead (default: false)"
     exit 1
 fi
 
@@ -91,6 +94,11 @@ echo "  Prefix:     $WINEPREFIX"
 echo "  Arch:       $TARGET_ARCH"
 echo "  Method:     $METHOD_DISPLAY"
 echo "  Sleep:      ${SLEEP:-0} ms"
+echo "  No-parent:  ${NO_PARENT:-false}"
+echo "  Follow:     ${FOLLOW_PROCESS:-false}"
+if [ "${FOLLOW_PROCESS:-false}" = "true" ] && [ -n "${FOLLOW_PROCESS_NAME:-}" ]; then
+    echo "  Follow name: $FOLLOW_PROCESS_NAME"
+fi
 echo ""
 echo "  Target:     $TARGET_EXE"
 echo "  DLL:        $DLL_PATH"
@@ -104,12 +112,27 @@ if [ -n "${SLEEP:-}" ] && [ "$SLEEP" != "0" ]; then
     SLEEP_ARGS=(--sleep "$SLEEP")
 fi
 
+NO_PARENT_ARGS=()
+if [ "${NO_PARENT:-false}" = "true" ]; then
+    NO_PARENT_ARGS=(--no-parent)
+fi
+
+FOLLOW_ARGS=()
+if [ "${FOLLOW_PROCESS:-false}" = "true" ]; then
+    FOLLOW_ARGS=(--follow-process)
+    if [ -n "${FOLLOW_PROCESS_NAME:-}" ]; then
+        FOLLOW_ARGS+=(--follow-process-name "$FOLLOW_PROCESS_NAME")
+    fi
+fi
+
 umu-run \
     "$INJECTOR_EXE" \
     "$WIN_TARGET" \
     "$WIN_DLL" \
     --log-file "$WIN_LOG" \
     "${SLEEP_ARGS[@]}" \
+    "${NO_PARENT_ARGS[@]}" \
+    "${FOLLOW_ARGS[@]}" \
     "$@"
 
 echo ""
