@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "inject.h"
+#include "manual_map.h"
 #include "logger.h"
 
 typedef NTSTATUS (NTAPI *NtCreateThreadEx_t)(
@@ -539,15 +540,16 @@ static BOOL inject_hook(DWORD pid, const wchar_t *dll_path) {
 }
 
 BOOL inject_dll(HANDLE process, HANDLE thread, DWORD pid, const wchar_t *dll_path, InjectionMethod method) {
-    static const wchar_t *names[] = {L"standard", L"apc", L"nt", L"hook"};
-    if (method >= 0 && method <= INJECTION_HOOK)
+    static const wchar_t *names[] = {L"standard", L"apc", L"nt", L"hook", L"manual_map"};
+    if (method >= 0 && method <= INJECTION_MANUAL_MAP)
         LOG_INFO(L"Injection method: %ls", names[method]);
 
     switch (method) {
-        case INJECTION_STANDARD: return inject_standard(process, dll_path);
-        case INJECTION_APC:      return inject_apc(process, thread, dll_path);
-        case INJECTION_NT:       return inject_nt(process, dll_path);
-        case INJECTION_HOOK:     return inject_hook(pid, dll_path);
+        case INJECTION_STANDARD:   return inject_standard(process, dll_path);
+        case INJECTION_APC:        return inject_apc(process, thread, dll_path);
+        case INJECTION_NT:         return inject_nt(process, dll_path);
+        case INJECTION_HOOK:       return inject_hook(pid, dll_path);
+        case INJECTION_MANUAL_MAP: return inject_manual_map(process, dll_path);
         default:
             LOG_ERROR(L"Unknown injection method: %d", method);
             return FALSE;

@@ -1,6 +1,6 @@
 CC32 = i686-w64-mingw32-gcc
 CC64 = x86_64-w64-mingw32-gcc
-CFLAGS = -Wall -O2 -Iinclude -municode
+CFLAGS = -Wall -O2 -Iinclude -municode -fno-stack-protector
 LDFLAGS = -municode -lkernel32 -luser32
 
 SRC_DIR = src

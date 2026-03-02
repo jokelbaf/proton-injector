@@ -6,7 +6,8 @@ typedef enum {
     INJECTION_STANDARD,
     INJECTION_APC,
     INJECTION_NT,
-    INJECTION_HOOK
+    INJECTION_HOOK,
+    INJECTION_MANUAL_MAP
 } InjectionMethod;
 
 BOOL  wait_for_process_init(HANDLE process, int timeout_ms);

@@ -53,7 +53,7 @@ static void print_usage(const wchar_t *program_name) {
     wprintf(L"  target.exe              Path to the target executable\n");
     wprintf(L"  dll.dll                 Path to the DLL to inject\n\n");
     wprintf(L"Options:\n");
-    wprintf(L"  --method <type>         Injection method (standard, apc, nt, hook) [default: standard]\n");
+    wprintf(L"  --method <type>         Injection method (standard, apc, nt, hook, manual_map) [default: standard]\n");
     wprintf(L"  --log-file <path>       Log file path\n");
     wprintf(L"  --sleep <ms>            Delay in milliseconds before injection [default: 0]\n");
     wprintf(L"  --follow-process        Inject into best child process when parent exits with 0\n");
@@ -97,6 +97,8 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
                 args->method = INJECTION_NT;
             else if (wcscmp(method, L"hook") == 0)
                 args->method = INJECTION_HOOK;
+            else if (wcscmp(method, L"manual_map") == 0)
+                args->method = INJECTION_MANUAL_MAP;
             else {
                 wprintf(L"Error: Invalid injection method '%ls'\n", method);
                 return 0;
