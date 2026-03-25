@@ -44,10 +44,14 @@ LOG_FILE="$PROJECT_ROOT/injector.log"
 INJECTION_METHOD="standard"
 PREV=""
 for arg in "$@"; do
-    if [[ "$PREV" == "--method" ]]; then
-        INJECTION_METHOD="$arg"
-        break
-    fi
+    case "$PREV" in
+        --method)             INJECTION_METHOD="$arg" ;;
+        --follow-process-name) FOLLOW_PROCESS_NAME="$arg" ;;
+    esac
+    case "$arg" in
+        --follow-process) FOLLOW_PROCESS=true ;;
+        --no-parent)      NO_PARENT=true ;;
+    esac
     PREV="$arg"
 done
 

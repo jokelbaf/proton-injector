@@ -131,7 +131,7 @@ static int common_path_components(const wchar_t *a, const wchar_t *b) {
 }
 
 static DWORD find_follow_candidate(DWORD parent_pid, const wchar_t *parent_exe,
-                                   FILETIME parent_exit_time, const wchar_t *follow_name) {
+                                   const FILETIME *ref_time, const wchar_t *follow_name) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
         LOG_WARN(L"Failed to enumerate processes for follow-process: %lu", GetLastError());
@@ -193,7 +193,7 @@ static DWORD find_follow_candidate(DWORD parent_pid, const wchar_t *parent_exe,
     CloseHandle(snapshot);
 
     if (count == 0) {
-        LOG_WARN(L"No alive child processes found to follow");
+        LOG_DEBUG(L"No alive child processes found to follow");
         free(candidates);
         return 0;
     }
@@ -210,8 +210,8 @@ static DWORD find_follow_candidate(DWORD parent_pid, const wchar_t *parent_exe,
         if (i_name && !best_name)    { best = (int)i; continue; }
         if (!i_name && best_name)    { continue; }
 
-        LONGLONG i_delta    = filetime_delta(&candidates[i].start_time,    &parent_exit_time);
-        LONGLONG best_delta = filetime_delta(&candidates[best].start_time, &parent_exit_time);
+        LONGLONG i_delta    = filetime_delta(&candidates[i].start_time,    ref_time);
+        LONGLONG best_delta = filetime_delta(&candidates[best].start_time, ref_time);
 
         if (i_delta < best_delta)    { best = (int)i; continue; }
         if (i_delta > best_delta)    { continue; }
@@ -226,6 +226,90 @@ static DWORD find_follow_candidate(DWORD parent_pid, const wchar_t *parent_exe,
     LOG_INFO(L"Selected follow candidate: [%5lu] %ls", best_pid, candidates[best].exe_name);
     free(candidates);
     return best_pid;
+}
+
+static BOOL is_descendant_of(HANDLE snapshot, DWORD pid, DWORD ancestor_pid) {
+    DWORD current = pid;
+    for (int depth = 0; depth < 16; depth++) {
+        if (current == ancestor_pid)
+            return TRUE;
+        if (current == 0)
+            return FALSE;
+
+        PROCESSENTRY32W pe = {0};
+        pe.dwSize = sizeof(pe);
+        BOOL found = FALSE;
+
+        if (Process32FirstW(snapshot, &pe)) {
+            do {
+                if (pe.th32ProcessID == current) {
+                    current = pe.th32ParentProcessID;
+                    found = TRUE;
+                    break;
+                }
+            } while (Process32NextW(snapshot, &pe));
+        }
+
+        if (!found)
+            return FALSE;
+    }
+    return FALSE;
+}
+
+static DWORD find_descendant_by_name(DWORD ancestor_pid, const wchar_t *name) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return 0;
+
+    PROCESSENTRY32W pe = {0};
+    pe.dwSize = sizeof(pe);
+    DWORD result = 0;
+
+    if (Process32FirstW(snapshot, &pe)) {
+        do {
+            if (_wcsicmp(pe.szExeFile, name) != 0)
+                continue;
+            if (pe.th32ProcessID == ancestor_pid)
+                continue;
+            if (is_descendant_of(snapshot, pe.th32ProcessID, ancestor_pid)) {
+                result = pe.th32ProcessID;
+                LOG_INFO(L"Found descendant process: [%5lu] %ls", result, pe.szExeFile);
+                break;
+            }
+        } while (Process32NextW(snapshot, &pe));
+    }
+
+    CloseHandle(snapshot);
+    return result;
+}
+
+static DWORD poll_for_child_process(HANDLE parent_proc, DWORD parent_pid,
+                                    const wchar_t *parent_exe,
+                                    const wchar_t *follow_name) {
+    const int interval = 500;
+
+    LOG_INFO(L"Polling for child process '%ls'...",
+             follow_name ? follow_name : L"*");
+
+    for (;;) {
+        if (WaitForSingleObject(parent_proc, 0) != WAIT_TIMEOUT)
+            return 0;
+
+        DWORD pid = 0;
+
+        if (follow_name) {
+            pid = find_descendant_by_name(parent_pid, follow_name);
+        } else {
+            FILETIME now;
+            GetSystemTimeAsFileTime(&now);
+            pid = find_follow_candidate(parent_pid, parent_exe, &now, NULL);
+        }
+
+        if (pid)
+            return pid;
+
+        Sleep(interval);
+    }
 }
 
 static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_path,
@@ -373,6 +457,24 @@ int wmain(int argc, wchar_t **argv) {
         ResumeThread(pi.hThread);
     } else {
         LOG_INFO(L"Skipping parent injection (--no-parent)");
+
+        for (;;) {
+            DWORD follow_pid = poll_for_child_process(
+                pi.hProcess, pi.dwProcessId, target_exe_full, args.follow_process_name);
+
+            if (!follow_pid) {
+                LOG_INFO(L"Parent process exited, stopping");
+                break;
+            }
+
+            inject_into_followed_process(follow_pid, dll_path_full, args.sleep_ms, args.method);
+            LOG_INFO(L"Resuming child process watch...");
+        }
+
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        logger_cleanup();
+        return 0;
     }
 
     LOG_INFO(L"Waiting for process to exit...");
@@ -385,18 +487,14 @@ int wmain(int argc, wchar_t **argv) {
     GetExitCodeProcess(pi.hProcess, &exit_code);
     LOG_INFO(L"Process exited with code %lu", exit_code);
 
-    BOOL should_follow = args.no_parent || (exit_code == 0 && args.follow_process);
-    if (should_follow) {
+    if (exit_code == 0 && args.follow_process) {
         FILETIME ft_create, ft_exit, ft_kernel, ft_user;
         GetProcessTimes(pi.hProcess, &ft_create, &ft_exit, &ft_kernel, &ft_user);
 
-        if (args.no_parent)
-            LOG_INFO(L"Scanning for child processes (--no-parent)...");
-        else
-            LOG_INFO(L"Follow-process enabled, scanning for child processes...");
+        LOG_INFO(L"Follow-process enabled, scanning for child processes...");
 
         DWORD follow_pid = find_follow_candidate(
-            pi.dwProcessId, target_exe_full, ft_exit, args.follow_process_name);
+            pi.dwProcessId, target_exe_full, &ft_exit, args.follow_process_name);
 
         if (!follow_pid) {
             LOG_WARN(L"No suitable child process found");
