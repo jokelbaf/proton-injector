@@ -9,6 +9,12 @@ STEAM_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
 if [ ! -d "$STEAM_PATH" ] && [ -d "$HOME/.var/app/com.valvesoftware.Steam/data/Steam" ]; then
     STEAM_PATH="$HOME/.var/app/com.valvesoftware.Steam/data/Steam"
 fi
+if [ ! -d "$STEAM_PATH" ] && [ -d "$HOME/.steam/steam" ]; then
+    STEAM_PATH="$HOME/.steam/steam"
+fi
+if [ ! -d "$STEAM_PATH" ] && [ -d "$HOME/.steam/debian-installation" ]; then
+    STEAM_PATH="$HOME/.steam/debian-installation"
+fi
 
 if [ -n "${STEAM_COMPAT_DATA_PATH:-}" ]; then
     COMPAT_DATA="$STEAM_COMPAT_DATA_PATH"
@@ -53,8 +59,8 @@ if [ $# -lt 2 ]; then
     echo ""
     echo "Environment variables:"
     echo "  APPID                                - Steam App ID (default: 0)"
-    echo "  STEAM_COMPAT_CLIENT_INSTALL_PATH     - Steam installation path"
-    echo "  STEAM_COMPAT_DATA_PATH               - Proton compatdata path"
+    echo "  STEAM_COMPAT_CLIENT_INSTALL_PATH     - Steam installation path (auto-detected if unset)"
+    echo "  STEAM_COMPAT_DATA_PATH               - Proton compatdata path (overrides auto-detection)"
     echo "  PROTON_PATH                          - Path to Proton (e.g., proton-ge)"
     echo "  SLEEP                                - Delay before injection in ms (default: 0)"
     echo "  FOLLOW_PROCESS                       - Inject into child process when parent exits with 0 (default: false)"
