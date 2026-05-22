@@ -55,7 +55,7 @@ if [ "${APPID}" != "0" ] && [ -n "${APPID}" ]; then
 fi
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <target.exe> <dll.dll> [additional args...]"
+    echo "Usage: $0 <target.exe> <dll.dll> [injector args...] [-- target args...]"
     echo ""
     echo "Environment variables:"
     echo "  APPID                                - Steam App ID (default: 0)"
@@ -86,6 +86,9 @@ LOG_FILE="$PROJECT_ROOT/injector.log"
 INJECTION_METHOD="standard"
 PREV=""
 for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+        break
+    fi
     if [[ "$PREV" == "--method" ]]; then
         INJECTION_METHOD="$arg"
         break

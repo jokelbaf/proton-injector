@@ -2,6 +2,7 @@
 #include <tlhelp32.h>
 #include <wctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <wchar.h>
 #include "inject.h"
 #include "logger.h"
@@ -17,6 +18,8 @@ typedef struct {
     BOOL follow_process;
     wchar_t *follow_process_name;
     BOOL no_parent;
+    wchar_t **target_args;
+    int target_argc;
 } Arguments;
 
 typedef struct {
@@ -59,8 +62,9 @@ static void print_usage(const wchar_t *program_name) {
     wprintf(L"  --follow-process        Inject into best child process when parent exits with 0\n");
     wprintf(L"  --follow-process-name   Preferred child process executable name\n");
     wprintf(L"  --no-parent             Skip parent injection; inject into child process instead\n\n");
+    wprintf(L"  --                      End of injector options; pass remaining args to target\n\n");
     wprintf(L"Example:\n");
-    wprintf(L"  %ls \"Z:\\path\\to\\game.exe\" \"Z:\\path\\to\\mod.dll\" --method apc --follow-process\n", program_name);
+    wprintf(L"  %ls \"Z:\\path\\to\\game.exe\" \"Z:\\path\\to\\mod.dll\" --method apc -- --foo bar\n", program_name);
 }
 
 static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
@@ -75,8 +79,15 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
     args->follow_process      = FALSE;
     args->follow_process_name = NULL;
     args->no_parent           = FALSE;
+    args->target_args          = NULL;
+    args->target_argc          = 0;
 
     for (int i = 3; i < argc; i++) {
+        if (wcscmp(argv[i], L"--") == 0) {
+            args->target_args = &argv[i + 1];
+            args->target_argc = argc - i - 1;
+            break;
+        }
         if (wcscmp(argv[i], L"--log-file") == 0 && i + 1 < argc) {
             args->log_file = argv[++i];
         } else if (wcscmp(argv[i], L"--sleep") == 0 && i + 1 < argc) {
@@ -107,6 +118,79 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
     }
 
     return 1;
+}
+
+static BOOL arg_needs_quotes(const wchar_t *arg) {
+    if (!arg || !*arg)
+        return TRUE;
+    for (const wchar_t *p = arg; *p; p++) {
+        if (*p == L' ' || *p == L'\t' || *p == L'"')
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL append_wchars(wchar_t *buf, size_t buf_size, const wchar_t *src, size_t len) {
+    size_t used = wcslen(buf);
+    if (used + len + 1 > buf_size)
+        return FALSE;
+    wmemcpy(buf + used, src, len);
+    buf[used + len] = L'\0';
+    return TRUE;
+}
+
+static BOOL append_char(wchar_t *buf, size_t buf_size, wchar_t ch) {
+    wchar_t tmp[2] = { ch, L'\0' };
+    return append_wchars(buf, buf_size, tmp, 1);
+}
+
+static BOOL append_quoted_arg(wchar_t *buf, size_t buf_size, const wchar_t *arg, BOOL first) {
+    if (!first) {
+        if (!append_char(buf, buf_size, L' '))
+            return FALSE;
+    }
+
+    if (!arg_needs_quotes(arg))
+        return append_wchars(buf, buf_size, arg, wcslen(arg));
+
+    if (!append_char(buf, buf_size, L'"'))
+        return FALSE;
+
+    size_t backslashes = 0;
+    for (const wchar_t *p = arg; *p; p++) {
+        if (*p == L'\\') {
+            backslashes++;
+            continue;
+        }
+
+        if (*p == L'"') {
+            for (size_t i = 0; i < backslashes * 2 + 1; i++) {
+                if (!append_char(buf, buf_size, L'\\'))
+                    return FALSE;
+            }
+            backslashes = 0;
+            if (!append_char(buf, buf_size, L'"'))
+                return FALSE;
+            continue;
+        }
+
+        while (backslashes > 0) {
+            if (!append_char(buf, buf_size, L'\\'))
+                return FALSE;
+            backslashes--;
+        }
+
+        if (!append_char(buf, buf_size, *p))
+            return FALSE;
+    }
+
+    while (backslashes > 0) {
+        if (!append_char(buf, buf_size, L'\\'))
+            return FALSE;
+        backslashes--;
+    }
+
+    return append_char(buf, buf_size, L'"');
 }
 
 static LONGLONG filetime_delta(const FILETIME *a, const FILETIME *b) {
@@ -420,14 +504,36 @@ int wmain(int argc, wchar_t **argv) {
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {0};
 
-    wchar_t cmdline[MAX_PATH];
-    wsprintfW(cmdline, L"\"%ls\"", target_exe_full);
+    const size_t cmdline_cap = 32767;
+    wchar_t *cmdline = (wchar_t *)malloc(cmdline_cap * sizeof(wchar_t));
+    if (!cmdline) {
+        LOG_ERROR(L"Failed to allocate command line buffer");
+        return 1;
+    }
+    cmdline[0] = L'\0';
+
+    if (!append_quoted_arg(cmdline, cmdline_cap, target_exe_full, TRUE)) {
+        LOG_ERROR(L"Command line is too long");
+        free(cmdline);
+        return 1;
+    }
+
+    for (int i = 0; i < args.target_argc; i++) {
+        if (!append_quoted_arg(cmdline, cmdline_cap, args.target_args[i], FALSE)) {
+            LOG_ERROR(L"Command line is too long");
+            free(cmdline);
+            return 1;
+        }
+    }
 
     if (!CreateProcessW(NULL, cmdline, NULL, NULL, FALSE,
                         CREATE_SUSPENDED, NULL, workdir, &si, &pi)) {
         LOG_ERROR(L"Failed to create process: error %lu", GetLastError());
+        free(cmdline);
         return 1;
     }
+
+    free(cmdline);
 
     LOG_INFO(L"Process created (PID: %lu)", pi.dwProcessId);
 

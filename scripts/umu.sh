@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <target.exe> <dll.dll> [additional args...]"
+    echo "Usage: $0 <target.exe> <dll.dll> [injector args...] [-- target args...]"
     echo ""
     echo "Environment variables:"
     echo "  PROTONPATH           - Path to Proton directory (required)"
@@ -44,8 +44,11 @@ LOG_FILE="$PROJECT_ROOT/injector.log"
 INJECTION_METHOD="standard"
 PREV=""
 for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+        break
+    fi
     case "$PREV" in
-        --method)             INJECTION_METHOD="$arg" ;;
+        --method)              INJECTION_METHOD="$arg" ;;
         --follow-process-name) FOLLOW_PROCESS_NAME="$arg" ;;
     esac
     case "$arg" in
