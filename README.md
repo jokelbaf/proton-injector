@@ -76,6 +76,10 @@ APPID=945360 ./scripts/inject.sh \
 # With custom Proton path and injection method
 APPID=945360 PROTON_PATH=/path/to/GE-Proton/proton ./scripts/inject.sh \
     /path/to/game.exe /path/to/mod.dll --method apc
+
+# With target launch options
+APPID=945360 ./scripts/inject.sh \
+    /path/to/game.exe /path/to/mod.dll -- --your -target=options
 ```
 
 | Variable | Description | Default |
@@ -100,6 +104,10 @@ PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
 # With custom Wine prefix
 PROTONPATH=/path/to/GE-Proton WINEPREFIX=~/.my-prefix ./scripts/umu.sh \
     /path/to/game.exe /path/to/mod.dll --method nt
+
+# With target launch options
+PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
+    /path/to/game.exe /path/to/mod.dll -- --your -target=options
 ```
 
 | Variable | Description | Default |
@@ -117,6 +125,9 @@ PROTONPATH=/path/to/GE-Proton WINEPREFIX=~/.my-prefix ./scripts/umu.sh \
 ```bash
 # Inside a Proton/Wine environment
 injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" --method apc --log-file "Z:\path\to\injector.log"
+
+# With target launch options
+injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" -- --your -target=options
 ```
 
 Options:
@@ -126,6 +137,7 @@ Options:
 - `--follow-process` — After the target exits with code `0`, inject into the best-matching child process
 - `--follow-process-name <name>` — Preferred child process executable name when using `--follow-process`
 - `--no-parent` — Skip injecting into the target; inject into its child process instead
+- `--` — End of injector options; pass remaining args to the target executable
 
 ## How It Works
 
