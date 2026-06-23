@@ -89,6 +89,7 @@ APPID=945360 ./scripts/inject.sh \
 | `STEAM_COMPAT_CLIENT_INSTALL_PATH` | Steam installation path | Auto-detected |
 | `STEAM_COMPAT_DATA_PATH` | Proton compatdata path | Auto-detected from `APPID` |
 | `SLEEP` | Delay before injection in ms | `0` |
+| `FOLLOW_SLEEP` | Delay before injecting into the followed child process in ms | `0` |
 | `FOLLOW_PROCESS` | Inject into child process when parent exits with `0` | `false` |
 | `FOLLOW_PROCESS_NAME` | Preferred child process executable name | — |
 | `NO_PARENT` | Skip parent injection; inject into child process instead | `false` |
@@ -116,6 +117,7 @@ PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
 | `WINEPREFIX` | Wine prefix path | `~/.proton-injector/pfx` |
 | `GAMEID` | Game ID for umu-run | `0` |
 | `SLEEP` | Delay before injection in ms | `0` |
+| `FOLLOW_SLEEP` | Delay before injecting into the followed child process in ms | `0` |
 | `FOLLOW_PROCESS` | Inject into child process when parent exits with `0` | `false` |
 | `FOLLOW_PROCESS_NAME` | Preferred child process executable name | — |
 | `NO_PARENT` | Skip parent injection; inject into child process instead | `false` |
@@ -134,6 +136,7 @@ Options:
 - `--method <type>` — Injection method: `standard`, `apc`, `nt`, `hook`, `manual_map` (default: `standard`)
 - `--log-file <path>` — Log file path (Windows-style `Z:` paths when under Proton)
 - `--sleep <ms>` — Delay in milliseconds before injection (default: `0`)
+- `--follow-sleep <ms>` — Delay in milliseconds before injecting into the followed child process (default: `0`)
 - `--follow-process` — After the target exits with code `0`, inject into the best-matching child process
 - `--follow-process-name <name>` — Preferred child process executable name when using `--follow-process`
 - `--no-parent` — Skip injecting into the target; inject into its child process instead
@@ -143,7 +146,7 @@ Options:
 
 1. Creates the target process in a suspended state, then resumes it
 2. Polls the target's PEB until `kernel32.dll` is loaded
-3. Resolves `LoadLibraryA` in the remote `kernel32.dll` via multi-step module lookup (PEB walk → VM query → toolhelp snapshot)
+3. Resolves `LoadLibraryA` in the remote `kernel32.dll` via multi-step module lookup (PEB walk > VM query > toolhelp snapshot)
 4. Writes the DLL path into the target process's memory
 5. Executes injection using the selected method
 6. Waits for the process to exit
