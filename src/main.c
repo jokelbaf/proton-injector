@@ -15,6 +15,7 @@ typedef struct {
     wchar_t *log_file;
     InjectionMethod method;
     DWORD sleep_ms;
+    DWORD follow_sleep_ms;
     BOOL follow_process;
     wchar_t *follow_process_name;
     BOOL no_parent;
@@ -59,6 +60,7 @@ static void print_usage(const wchar_t *program_name) {
     wprintf(L"  --method <type>         Injection method (standard, apc, nt, hook, manual_map) [default: standard]\n");
     wprintf(L"  --log-file <path>       Log file path\n");
     wprintf(L"  --sleep <ms>            Delay in milliseconds before injection [default: 0]\n");
+    wprintf(L"  --follow-sleep <ms>     Delay in milliseconds before injecting into followed child process [default: 0]\n");
     wprintf(L"  --follow-process        Inject into best child process when parent exits with 0\n");
     wprintf(L"  --follow-process-name   Preferred child process executable name\n");
     wprintf(L"  --no-parent             Skip parent injection; inject into child process instead\n\n");
@@ -76,6 +78,7 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
     args->log_file            = NULL;
     args->method              = INJECTION_STANDARD;
     args->sleep_ms            = 0;
+    args->follow_sleep_ms     = 0;
     args->follow_process      = FALSE;
     args->follow_process_name = NULL;
     args->no_parent           = FALSE;
@@ -92,6 +95,8 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
             args->log_file = argv[++i];
         } else if (wcscmp(argv[i], L"--sleep") == 0 && i + 1 < argc) {
             args->sleep_ms = (DWORD)wcstoul(argv[++i], NULL, 10);
+        } else if (wcscmp(argv[i], L"--follow-sleep") == 0 && i + 1 < argc) {
+            args->follow_sleep_ms = (DWORD)wcstoul(argv[++i], NULL, 10);
         } else if (wcscmp(argv[i], L"--follow-process") == 0) {
             args->follow_process = TRUE;
         } else if (wcscmp(argv[i], L"--follow-process-name") == 0 && i + 1 < argc) {
@@ -397,7 +402,7 @@ static DWORD poll_for_child_process(HANDLE parent_proc, DWORD parent_pid,
 }
 
 static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_path,
-                                         DWORD sleep_ms, InjectionMethod method) {
+                                         DWORD follow_sleep_ms, InjectionMethod method) {
     HANDLE follow_proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, follow_pid);
     if (!follow_proc) {
         LOG_ERROR(L"Failed to open followed process (PID: %lu): error %lu",
@@ -407,9 +412,9 @@ static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_pa
 
     wait_for_process_init(follow_proc, 10000);
 
-    if (sleep_ms > 0) {
-        LOG_INFO(L"Sleeping for %lu ms before injection...", sleep_ms);
-        Sleep(sleep_ms);
+    if (follow_sleep_ms > 0) {
+        LOG_INFO(L"Sleeping for %lu ms before injection...", follow_sleep_ms);
+        Sleep(follow_sleep_ms);
     }
 
     LOG_INFO(L"Injecting DLL into followed process...");
@@ -573,7 +578,7 @@ int wmain(int argc, wchar_t **argv) {
                 break;
             }
 
-            inject_into_followed_process(follow_pid, dll_path_full, args.sleep_ms, args.method);
+            inject_into_followed_process(follow_pid, dll_path_full, args.follow_sleep_ms, args.method);
             LOG_INFO(L"Resuming child process watch...");
         }
 
@@ -605,7 +610,7 @@ int wmain(int argc, wchar_t **argv) {
         if (!follow_pid) {
             LOG_WARN(L"No suitable child process found");
         } else {
-            inject_into_followed_process(follow_pid, dll_path_full, args.sleep_ms, args.method);
+            inject_into_followed_process(follow_pid, dll_path_full, args.follow_sleep_ms, args.method);
         }
     }
 

@@ -11,6 +11,7 @@ if [ $# -lt 2 ]; then
     echo "  WINEPREFIX           - Wine prefix path (default: ~/.proton-injector/pfx)"
     echo "  GAMEID               - Game ID for umu-run (default: 0)"
     echo "  SLEEP                - Delay before injection in ms (default: 0)"
+    echo "  FOLLOW_SLEEP         - Delay before injecting into followed child process in ms (default: 0)"
     echo "  FOLLOW_PROCESS       - Inject into child process when parent exits with 0 (default: false)"
     echo "  FOLLOW_PROCESS_NAME  - Preferred child process executable name (optional)"
     echo "  NO_PARENT            - Skip parent injection; inject into child process instead (default: false)"
@@ -101,6 +102,7 @@ echo "  Prefix:     $WINEPREFIX"
 echo "  Arch:       $TARGET_ARCH"
 echo "  Method:     $METHOD_DISPLAY"
 echo "  Sleep:      ${SLEEP:-0} ms"
+echo "  Follow sleep: ${FOLLOW_SLEEP:-0} ms"
 echo "  No-parent:  ${NO_PARENT:-false}"
 echo "  Follow:     ${FOLLOW_PROCESS:-false}"
 if [ "${FOLLOW_PROCESS:-false}" = "true" ] && [ -n "${FOLLOW_PROCESS_NAME:-}" ]; then
@@ -117,6 +119,11 @@ echo ""
 SLEEP_ARGS=()
 if [ -n "${SLEEP:-}" ] && [ "$SLEEP" != "0" ]; then
     SLEEP_ARGS=(--sleep "$SLEEP")
+fi
+
+FOLLOW_SLEEP_ARGS=()
+if [ -n "${FOLLOW_SLEEP:-}" ] && [ "$FOLLOW_SLEEP" != "0" ]; then
+    FOLLOW_SLEEP_ARGS=(--follow-sleep "$FOLLOW_SLEEP")
 fi
 
 NO_PARENT_ARGS=()
@@ -138,6 +145,7 @@ umu-run \
     "$WIN_DLL" \
     --log-file "$WIN_LOG" \
     "${SLEEP_ARGS[@]}" \
+    "${FOLLOW_SLEEP_ARGS[@]}" \
     "${NO_PARENT_ARGS[@]}" \
     "${FOLLOW_ARGS[@]}" \
     "$@"
