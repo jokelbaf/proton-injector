@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <target.exe> <dll.dll> [injector args...] [-- target args...]"
+    echo "Usage: $0 <target.exe> <dll.dll> [dll2.dll ...] [injector args...] [-- target args...]"
     echo ""
     echo "Environment variables:"
     echo "  PROTONPATH           - Path to Proton directory (required)"
@@ -29,8 +29,27 @@ command -v umu-run >/dev/null || {
 }
 
 TARGET_EXE="$1"
-DLL_PATH="$2"
-shift 2
+shift
+
+DLL_PATHS=()
+INJECTOR_ARGS=()
+COLLECTING_DLLS=1
+for arg in "$@"; do
+    if [ "$COLLECTING_DLLS" -eq 1 ]; then
+        case "$arg" in
+            --)       COLLECTING_DLLS=0; INJECTOR_ARGS+=("$arg") ;;
+            --*)      COLLECTING_DLLS=0; INJECTOR_ARGS+=("$arg") ;;
+            *)        DLL_PATHS+=("$arg") ;;
+        esac
+    else
+        INJECTOR_ARGS+=("$arg")
+    fi
+done
+
+if [ ${#DLL_PATHS[@]} -eq 0 ]; then
+    echo "Error: No DLL specified"
+    exit 1
+fi
 
 if file "$TARGET_EXE" | grep -q "PE32+"; then
     INJECTOR_EXE="$PROJECT_ROOT/bin/injector64.exe"
@@ -44,7 +63,7 @@ LOG_FILE="$PROJECT_ROOT/injector.log"
 
 INJECTION_METHOD="standard"
 PREV=""
-for arg in "$@"; do
+for arg in "${INJECTOR_ARGS[@]}"; do
     if [ "$arg" = "--" ]; then
         break
     fi
@@ -76,10 +95,12 @@ if [ ! -f "$TARGET_EXE" ]; then
     exit 1
 fi
 
-if [ ! -f "$DLL_PATH" ]; then
-    echo "Error: DLL not found: $DLL_PATH"
-    exit 1
-fi
+for dll in "${DLL_PATHS[@]}"; do
+    if [ ! -f "$dll" ]; then
+        echo "Error: DLL not found: $dll"
+        exit 1
+    fi
+done
 
 export PROTONPATH
 export WINEPREFIX="${WINEPREFIX:-$HOME/.proton-injector/pfx}"
@@ -90,7 +111,10 @@ to_windows_path() {
 }
 
 WIN_TARGET=$(to_windows_path "$TARGET_EXE")
-WIN_DLL=$(to_windows_path "$DLL_PATH")
+WIN_DLLS=()
+for dll in "${DLL_PATHS[@]}"; do
+    WIN_DLLS+=("$(to_windows_path "$dll")")
+done
 WIN_LOG=$(to_windows_path "$LOG_FILE")
 
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
@@ -110,7 +134,9 @@ if [ "${FOLLOW_PROCESS:-false}" = "true" ] && [ -n "${FOLLOW_PROCESS_NAME:-}" ];
 fi
 echo ""
 echo "  Target:     $TARGET_EXE"
-echo "  DLL:        $DLL_PATH"
+for i in "${!DLL_PATHS[@]}"; do
+    echo "  DLL $((i+1))/${#DLL_PATHS[@]}:     ${DLL_PATHS[$i]}"
+done
 echo "  Log:        $LOG_FILE"
 echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
@@ -142,13 +168,13 @@ fi
 umu-run \
     "$INJECTOR_EXE" \
     "$WIN_TARGET" \
-    "$WIN_DLL" \
+    "${WIN_DLLS[@]}" \
     --log-file "$WIN_LOG" \
     "${SLEEP_ARGS[@]}" \
     "${FOLLOW_SLEEP_ARGS[@]}" \
     "${NO_PARENT_ARGS[@]}" \
     "${FOLLOW_ARGS[@]}" \
-    "$@"
+    "${INJECTOR_ARGS[@]}"
 
 echo ""
 echo "Injection completed. Check $LOG_FILE for details."

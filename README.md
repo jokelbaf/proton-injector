@@ -13,6 +13,7 @@ A DLL injector for Windows executables running under Proton/Wine on Linux. Suppo
 
 - 32-bit and 64-bit injection
 - Five injection methods: Standard, APC, NT, Hook, Manual Map
+- Multiple DLL injection (inject several DLLs in sequence)
 - Child process injection: follow launcher processes or skip parent entirely
 - Multi-step injection with automatic fallbacks (PEB walk, VM query, toolhelp)
 - Steam runtime integration (reaper/launch wrapper) for Steam API authentication
@@ -73,6 +74,10 @@ APPID=945360 ./scripts/inject.sh \
     "$HOME/.local/share/Steam/steamapps/common/Among Us/Among Us.exe" \
     /path/to/your.dll
 
+# With multiple DLLs (injected in order)
+APPID=945360 ./scripts/inject.sh \
+    /path/to/game.exe /path/to/mod1.dll /path/to/mod2.dll
+
 # With custom Proton path and injection method
 APPID=945360 PROTON_PATH=/path/to/GE-Proton/proton ./scripts/inject.sh \
     /path/to/game.exe /path/to/mod.dll --method apc
@@ -102,6 +107,10 @@ For games outside of Steam, [umu-run](https://github.com/Open-Wine-Components/um
 PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
     /path/to/game.exe /path/to/mod.dll
 
+# With multiple DLLs
+PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
+    /path/to/game.exe /path/to/mod1.dll /path/to/mod2.dll
+
 # With custom Wine prefix
 PROTONPATH=/path/to/GE-Proton WINEPREFIX=~/.my-prefix ./scripts/umu.sh \
     /path/to/game.exe /path/to/mod.dll --method nt
@@ -128,6 +137,9 @@ PROTONPATH=/path/to/GE-Proton ./scripts/umu.sh \
 # Inside a Proton/Wine environment
 injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" --method apc --log-file "Z:\path\to\injector.log"
 
+# With multiple DLLs (injected in order)
+injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod1.dll" "Z:\path\to\mod2.dll" --method apc
+
 # With target launch options
 injector64.exe "Z:\path\to\game.exe" "Z:\path\to\mod.dll" -- --your -target=options
 ```
@@ -141,6 +153,8 @@ Options:
 - `--follow-process-name <name>` — Preferred child process executable name when using `--follow-process`
 - `--no-parent` — Skip injecting into the target; inject into its child process instead
 - `--` — End of injector options; pass remaining args to the target executable
+
+Multiple DLLs can be specified by listing them consecutively: `injector64.exe game.exe dll1.dll dll2.dll dll3.dll`
 
 ## How It Works
 
