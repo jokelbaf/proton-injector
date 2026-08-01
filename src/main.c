@@ -463,6 +463,16 @@ static void inject_into_followed_process(DWORD follow_pid, wchar_t **dll_paths, 
         }
     }
 
+    BOOL apc_suspended = FALSE;
+    if (follow_method == INJECTION_APC) {
+        if (SuspendThread(follow_thread) == (DWORD)-1) {
+            LOG_WARN(L"Could not suspend follow process main thread; falling back to standard injection");
+            follow_method = INJECTION_STANDARD;
+        } else {
+            apc_suspended = TRUE;
+        }
+    }
+
     BOOL all_ok = TRUE;
     for (int i = 0; i < dll_count; i++) {
         if (dll_count > 1)
@@ -479,9 +489,10 @@ static void inject_into_followed_process(DWORD follow_pid, wchar_t **dll_paths, 
         LOG_INFO(L"DLL injected successfully: %ls", dll_paths[i]);
     }
 
+    if (apc_suspended)
+        ResumeThread(follow_thread);
+
     if (all_ok) {
-        if (follow_method == INJECTION_APC && follow_thread)
-            ResumeThread(follow_thread);
 
         LOG_INFO(L"Waiting for followed process to exit...");
         WaitForSingleObject(follow_proc, INFINITE);
@@ -621,6 +632,20 @@ int wmain(int argc, wchar_t **argv) {
             Sleep(args.sleep_ms);
         }
 
+        BOOL apc_suspended = FALSE;
+        if (args.method == INJECTION_APC) {
+            if (SuspendThread(pi.hThread) == (DWORD)-1) {
+                LOG_ERROR(L"Could not suspend target main thread: %lu", GetLastError());
+                TerminateProcess(pi.hProcess, 1);
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                for (int j = 0; j < args.dll_count; j++) free(dll_paths_full[j]);
+                free(dll_paths_full);
+                return 1;
+            }
+            apc_suspended = TRUE;
+        }
+
         for (int i = 0; i < args.dll_count; i++) {
             if (args.dll_count > 1)
                 LOG_INFO(L"Injecting DLL %d/%d...", i + 1, args.dll_count);
@@ -629,6 +654,8 @@ int wmain(int argc, wchar_t **argv) {
 
             if (!inject_dll(pi.hProcess, pi.hThread, pi.dwProcessId, dll_paths_full[i], args.method)) {
                 LOG_ERROR(L"DLL injection failed: %ls", dll_paths_full[i]);
+                if (apc_suspended)
+                    ResumeThread(pi.hThread);
                 TerminateProcess(pi.hProcess, 1);
                 CloseHandle(pi.hThread);
                 CloseHandle(pi.hProcess);
@@ -640,7 +667,8 @@ int wmain(int argc, wchar_t **argv) {
             LOG_INFO(L"DLL injected successfully: %ls", dll_paths_full[i]);
         }
 
-        ResumeThread(pi.hThread);
+        if (apc_suspended)
+            ResumeThread(pi.hThread);
     } else {
         LOG_INFO(L"Skipping parent injection (--no-parent)");
 
