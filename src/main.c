@@ -7,7 +7,7 @@
 #include "inject.h"
 #include "logger.h"
 
-#define VERSION "3.3.0"
+#define VERSION "4.0.0"
 
 typedef struct {
     wchar_t *target_exe;
