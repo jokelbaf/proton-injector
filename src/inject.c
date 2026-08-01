@@ -417,8 +417,6 @@ static BOOL inject_apc(HANDLE process, HANDLE thread, const wchar_t *dll_path) {
     if (!prepare_loadlibrary_injection(process, dll_path, &load_lib, &remote_path))
         return FALSE;
 
-    SuspendThread(thread);
-
     if (!QueueUserAPC((PAPCFUNC)load_lib, thread, (ULONG_PTR)remote_path)) {
         LOG_ERROR(L"QueueUserAPC failed: %lu", GetLastError());
         VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);

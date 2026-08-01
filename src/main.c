@@ -11,7 +11,8 @@
 
 typedef struct {
     wchar_t *target_exe;
-    wchar_t *dll_path;
+    wchar_t **dll_paths;
+    int dll_count;
     wchar_t *log_file;
     InjectionMethod method;
     DWORD sleep_ms;
@@ -52,10 +53,10 @@ static void log_process_list(void) {
 
 static void print_usage(const wchar_t *program_name) {
     wprintf(L"Proton DLL Injector v%hs\n", VERSION);
-    wprintf(L"Usage: %ls <target.exe> <dll.dll> [options]\n\n", program_name);
+    wprintf(L"Usage: %ls <target.exe> <dll.dll> [dll2.dll ...] [options]\n\n", program_name);
     wprintf(L"Arguments:\n");
     wprintf(L"  target.exe              Path to the target executable\n");
-    wprintf(L"  dll.dll                 Path to the DLL to inject\n\n");
+    wprintf(L"  dll.dll [dll2.dll ...]  Path(s) to DLL(s) to inject (in order)\n\n");
     wprintf(L"Options:\n");
     wprintf(L"  --method <type>         Injection method (standard, apc, nt, hook, manual_map) [default: standard]\n");
     wprintf(L"  --log-file <path>       Log file path\n");
@@ -74,7 +75,8 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
         return 0;
 
     args->target_exe          = argv[1];
-    args->dll_path            = argv[2];
+    args->dll_paths           = NULL;
+    args->dll_count           = 0;
     args->log_file            = NULL;
     args->method              = INJECTION_STANDARD;
     args->sleep_ms            = 0;
@@ -85,7 +87,35 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
     args->target_args          = NULL;
     args->target_argc          = 0;
 
-    for (int i = 3; i < argc; i++) {
+    int dll_capacity = 8;
+    args->dll_paths = (wchar_t **)malloc(dll_capacity * sizeof(wchar_t *));
+    if (!args->dll_paths)
+        return 0;
+
+    int i = 2;
+    for (; i < argc; i++) {
+        if (wcscmp(argv[i], L"--") == 0) {
+            args->target_args = &argv[i + 1];
+            args->target_argc = argc - i - 1;
+            break;
+        }
+        if (wcsncmp(argv[i], L"--", 2) == 0)
+            break;
+
+        if (args->dll_count == dll_capacity) {
+            dll_capacity *= 2;
+            wchar_t **resized = (wchar_t **)realloc(args->dll_paths, dll_capacity * sizeof(wchar_t *));
+            if (!resized)
+                return 0;
+            args->dll_paths = resized;
+        }
+        args->dll_paths[args->dll_count++] = argv[i];
+    }
+
+    if (args->dll_count == 0)
+        return 0;
+
+    for (; i < argc; i++) {
         if (wcscmp(argv[i], L"--") == 0) {
             args->target_args = &argv[i + 1];
             args->target_argc = argc - i - 1;
@@ -401,7 +431,7 @@ static DWORD poll_for_child_process(HANDLE parent_proc, DWORD parent_pid,
     }
 }
 
-static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_path,
+static void inject_into_followed_process(DWORD follow_pid, wchar_t **dll_paths, int dll_count,
                                          DWORD follow_sleep_ms, InjectionMethod method) {
     HANDLE follow_proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, follow_pid);
     if (!follow_proc) {
@@ -416,8 +446,6 @@ static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_pa
         LOG_INFO(L"Sleeping for %lu ms before injection...", follow_sleep_ms);
         Sleep(follow_sleep_ms);
     }
-
-    LOG_INFO(L"Injecting DLL into followed process...");
 
     HANDLE follow_thread = NULL;
     InjectionMethod follow_method = method;
@@ -435,13 +463,36 @@ static void inject_into_followed_process(DWORD follow_pid, const wchar_t *dll_pa
         }
     }
 
-    if (!inject_dll(follow_proc, follow_thread, follow_pid, dll_path, follow_method)) {
-        LOG_ERROR(L"DLL injection into followed process failed");
-    } else {
-        LOG_INFO(L"DLL injected into followed process successfully");
+    BOOL apc_suspended = FALSE;
+    if (follow_method == INJECTION_APC) {
+        if (SuspendThread(follow_thread) == (DWORD)-1) {
+            LOG_WARN(L"Could not suspend follow process main thread; falling back to standard injection");
+            follow_method = INJECTION_STANDARD;
+        } else {
+            apc_suspended = TRUE;
+        }
+    }
 
-        if (follow_method == INJECTION_APC && follow_thread)
-            ResumeThread(follow_thread);
+    BOOL all_ok = TRUE;
+    for (int i = 0; i < dll_count; i++) {
+        if (dll_count > 1)
+            LOG_INFO(L"Injecting DLL %d/%d into followed process...", i + 1, dll_count);
+        else
+            LOG_INFO(L"Injecting DLL into followed process...");
+
+        if (!inject_dll(follow_proc, follow_thread, follow_pid, dll_paths[i], follow_method)) {
+            LOG_ERROR(L"DLL injection into followed process failed: %ls", dll_paths[i]);
+            all_ok = FALSE;
+            break;
+        }
+
+        LOG_INFO(L"DLL injected successfully: %ls", dll_paths[i]);
+    }
+
+    if (apc_suspended)
+        ResumeThread(follow_thread);
+
+    if (all_ok) {
 
         LOG_INFO(L"Waiting for followed process to exit...");
         WaitForSingleObject(follow_proc, INFINITE);
@@ -471,18 +522,13 @@ int wmain(int argc, wchar_t **argv) {
 
     LOG_INFO(L"Proton DLL Injector v%hs", VERSION);
     LOG_INFO(L"Target: %ls", args.target_exe);
-    LOG_INFO(L"DLL: %ls", args.dll_path);
+    for (int i = 0; i < args.dll_count; i++)
+        LOG_INFO(L"DLL %d/%d: %ls", i + 1, args.dll_count, args.dll_paths[i]);
 
     wchar_t target_exe_full[MAX_PATH];
-    wchar_t dll_path_full[MAX_PATH];
 
     if (!GetFullPathNameW(args.target_exe, MAX_PATH, target_exe_full, NULL)) {
         LOG_ERROR(L"Invalid target executable path");
-        return 1;
-    }
-
-    if (!GetFullPathNameW(args.dll_path, MAX_PATH, dll_path_full, NULL)) {
-        LOG_ERROR(L"Invalid DLL path");
         return 1;
     }
 
@@ -491,9 +537,34 @@ int wmain(int argc, wchar_t **argv) {
         return 1;
     }
 
-    if (GetFileAttributesW(dll_path_full) == INVALID_FILE_ATTRIBUTES) {
-        LOG_ERROR(L"DLL not found: %ls", dll_path_full);
+    wchar_t **dll_paths_full = (wchar_t **)malloc(args.dll_count * sizeof(wchar_t *));
+    if (!dll_paths_full) {
+        LOG_ERROR(L"Failed to allocate DLL path array");
         return 1;
+    }
+
+    for (int i = 0; i < args.dll_count; i++) {
+        dll_paths_full[i] = (wchar_t *)malloc(MAX_PATH * sizeof(wchar_t));
+        if (!dll_paths_full[i]) {
+            LOG_ERROR(L"Failed to allocate DLL path buffer");
+            for (int j = 0; j < i; j++) free(dll_paths_full[j]);
+            free(dll_paths_full);
+            return 1;
+        }
+
+        if (!GetFullPathNameW(args.dll_paths[i], MAX_PATH, dll_paths_full[i], NULL)) {
+            LOG_ERROR(L"Invalid DLL path: %ls", args.dll_paths[i]);
+            for (int j = 0; j <= i; j++) free(dll_paths_full[j]);
+            free(dll_paths_full);
+            return 1;
+        }
+
+        if (GetFileAttributesW(dll_paths_full[i]) == INVALID_FILE_ATTRIBUTES) {
+            LOG_ERROR(L"DLL not found: %ls", dll_paths_full[i]);
+            for (int j = 0; j <= i; j++) free(dll_paths_full[j]);
+            free(dll_paths_full);
+            return 1;
+        }
     }
 
     wchar_t workdir[MAX_PATH];
@@ -513,6 +584,8 @@ int wmain(int argc, wchar_t **argv) {
     wchar_t *cmdline = (wchar_t *)malloc(cmdline_cap * sizeof(wchar_t));
     if (!cmdline) {
         LOG_ERROR(L"Failed to allocate command line buffer");
+        for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
+        free(dll_paths_full);
         return 1;
     }
     cmdline[0] = L'\0';
@@ -520,6 +593,8 @@ int wmain(int argc, wchar_t **argv) {
     if (!append_quoted_arg(cmdline, cmdline_cap, target_exe_full, TRUE)) {
         LOG_ERROR(L"Command line is too long");
         free(cmdline);
+        for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
+        free(dll_paths_full);
         return 1;
     }
 
@@ -527,6 +602,8 @@ int wmain(int argc, wchar_t **argv) {
         if (!append_quoted_arg(cmdline, cmdline_cap, args.target_args[i], FALSE)) {
             LOG_ERROR(L"Command line is too long");
             free(cmdline);
+            for (int j = 0; j < args.dll_count; j++) free(dll_paths_full[j]);
+            free(dll_paths_full);
             return 1;
         }
     }
@@ -535,6 +612,8 @@ int wmain(int argc, wchar_t **argv) {
                         CREATE_SUSPENDED, NULL, workdir, &si, &pi)) {
         LOG_ERROR(L"Failed to create process: error %lu", GetLastError());
         free(cmdline);
+        for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
+        free(dll_paths_full);
         return 1;
     }
 
@@ -553,19 +632,43 @@ int wmain(int argc, wchar_t **argv) {
             Sleep(args.sleep_ms);
         }
 
-        LOG_INFO(L"Injecting DLL...");
-
-        if (!inject_dll(pi.hProcess, pi.hThread, pi.dwProcessId, dll_path_full, args.method)) {
-            LOG_ERROR(L"DLL injection failed");
-            TerminateProcess(pi.hProcess, 1);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            return 1;
+        BOOL apc_suspended = FALSE;
+        if (args.method == INJECTION_APC) {
+            if (SuspendThread(pi.hThread) == (DWORD)-1) {
+                LOG_ERROR(L"Could not suspend target main thread: %lu", GetLastError());
+                TerminateProcess(pi.hProcess, 1);
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                for (int j = 0; j < args.dll_count; j++) free(dll_paths_full[j]);
+                free(dll_paths_full);
+                return 1;
+            }
+            apc_suspended = TRUE;
         }
 
-        LOG_INFO(L"DLL injected successfully");
+        for (int i = 0; i < args.dll_count; i++) {
+            if (args.dll_count > 1)
+                LOG_INFO(L"Injecting DLL %d/%d...", i + 1, args.dll_count);
+            else
+                LOG_INFO(L"Injecting DLL...");
 
-        ResumeThread(pi.hThread);
+            if (!inject_dll(pi.hProcess, pi.hThread, pi.dwProcessId, dll_paths_full[i], args.method)) {
+                LOG_ERROR(L"DLL injection failed: %ls", dll_paths_full[i]);
+                if (apc_suspended)
+                    ResumeThread(pi.hThread);
+                TerminateProcess(pi.hProcess, 1);
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                for (int j = 0; j < args.dll_count; j++) free(dll_paths_full[j]);
+                free(dll_paths_full);
+                return 1;
+            }
+
+            LOG_INFO(L"DLL injected successfully: %ls", dll_paths_full[i]);
+        }
+
+        if (apc_suspended)
+            ResumeThread(pi.hThread);
     } else {
         LOG_INFO(L"Skipping parent injection (--no-parent)");
 
@@ -578,12 +681,15 @@ int wmain(int argc, wchar_t **argv) {
                 break;
             }
 
-            inject_into_followed_process(follow_pid, dll_path_full, args.follow_sleep_ms, args.method);
+            inject_into_followed_process(follow_pid, dll_paths_full, args.dll_count,
+                                         args.follow_sleep_ms, args.method);
             LOG_INFO(L"Resuming child process watch...");
         }
 
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
+        for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
+        free(dll_paths_full);
         logger_cleanup();
         return 0;
     }
@@ -610,12 +716,16 @@ int wmain(int argc, wchar_t **argv) {
         if (!follow_pid) {
             LOG_WARN(L"No suitable child process found");
         } else {
-            inject_into_followed_process(follow_pid, dll_path_full, args.follow_sleep_ms, args.method);
+            inject_into_followed_process(follow_pid, dll_paths_full, args.dll_count,
+                                         args.follow_sleep_ms, args.method);
         }
     }
 
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+
+    for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
+    free(dll_paths_full);
 
     logger_cleanup();
     return 0;

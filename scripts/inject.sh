@@ -55,7 +55,7 @@ if [ "${APPID}" != "0" ] && [ -n "${APPID}" ]; then
 fi
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <target.exe> <dll.dll> [injector args...] [-- target args...]"
+    echo "Usage: $0 <target.exe> <dll.dll> [dll2.dll ...] [injector args...] [-- target args...]"
     echo ""
     echo "Environment variables:"
     echo "  APPID                                - Steam App ID (default: 0)"
@@ -71,8 +71,27 @@ if [ $# -lt 2 ]; then
 fi
 
 TARGET_EXE="$1"
-DLL_PATH="$2"
-shift 2
+shift
+
+DLL_PATHS=()
+INJECTOR_ARGS=()
+COLLECTING_DLLS=1
+for arg in "$@"; do
+    if [ "$COLLECTING_DLLS" -eq 1 ]; then
+        case "$arg" in
+            --)       COLLECTING_DLLS=0; INJECTOR_ARGS+=("$arg") ;;
+            --*)      COLLECTING_DLLS=0; INJECTOR_ARGS+=("$arg") ;;
+            *)        DLL_PATHS+=("$arg") ;;
+        esac
+    else
+        INJECTOR_ARGS+=("$arg")
+    fi
+done
+
+if [ ${#DLL_PATHS[@]} -eq 0 ]; then
+    echo "Error: No DLL specified"
+    exit 1
+fi
 
 if file "$TARGET_EXE" | grep -q "PE32+"; then
     INJECTOR_EXE="$PROJECT_ROOT/bin/injector64.exe"
@@ -86,7 +105,7 @@ LOG_FILE="$PROJECT_ROOT/injector.log"
 
 INJECTION_METHOD="standard"
 PREV=""
-for arg in "$@"; do
+for arg in "${INJECTOR_ARGS[@]}"; do
     if [ "$arg" = "--" ]; then
         break
     fi
@@ -114,10 +133,12 @@ if [ ! -f "$TARGET_EXE" ]; then
     exit 1
 fi
 
-if [ ! -f "$DLL_PATH" ]; then
-    echo "Error: DLL not found: $DLL_PATH"
-    exit 1
-fi
+for dll in "${DLL_PATHS[@]}"; do
+    if [ ! -f "$dll" ]; then
+        echo "Error: DLL not found: $dll"
+        exit 1
+    fi
+done
 
 PROTON="${PROTON_PATH:-proton-ge}"
 
@@ -127,7 +148,10 @@ to_windows_path() {
 
 WIN_INJECTOR=$(to_windows_path "$INJECTOR_EXE")
 WIN_TARGET=$(to_windows_path "$TARGET_EXE")
-WIN_DLL=$(to_windows_path "$DLL_PATH")
+WIN_DLLS=()
+for dll in "${DLL_PATHS[@]}"; do
+    WIN_DLLS+=("$(to_windows_path "$dll")")
+done
 WIN_LOG=$(to_windows_path "$LOG_FILE")
 
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
@@ -147,7 +171,9 @@ if [ "${FOLLOW_PROCESS:-false}" = "true" ] && [ -n "${FOLLOW_PROCESS_NAME:-}" ];
 fi
 echo ""
 echo "  Target:     $TARGET_EXE"
-echo "  DLL:        $DLL_PATH"
+for i in "${!DLL_PATHS[@]}"; do
+    echo "  DLL $((i+1))/${#DLL_PATHS[@]}:     ${DLL_PATHS[$i]}"
+done
 echo "  Log:        $LOG_FILE"
 echo ""
 echo "───────────────────────────────────────────────────────────────────────────"
@@ -176,7 +202,7 @@ if [ "${FOLLOW_PROCESS:-false}" = "true" ]; then
     fi
 fi
 
-PROTON_CMD=("$PROTON" waitforexitandrun "$WIN_INJECTOR" "$WIN_TARGET" "$WIN_DLL" --log-file "$WIN_LOG" "${SLEEP_ARGS[@]}" "${FOLLOW_SLEEP_ARGS[@]}" "${NO_PARENT_ARGS[@]}" "${FOLLOW_ARGS[@]}" "$@")
+PROTON_CMD=("$PROTON" waitforexitandrun "$WIN_INJECTOR" "$WIN_TARGET" "${WIN_DLLS[@]}" --log-file "$WIN_LOG" "${SLEEP_ARGS[@]}" "${FOLLOW_SLEEP_ARGS[@]}" "${NO_PARENT_ARGS[@]}" "${FOLLOW_ARGS[@]}" "${INJECTOR_ARGS[@]}")
 
 if [ "${APPID}" != "0" ] && [ -n "${APPID}" ] && [ -x "$STEAM_LAUNCHER" ] && [ -x "$STEAM_REAPER" ]; then
     "$STEAM_LAUNCHER" -- "$STEAM_REAPER" SteamLaunch AppId="$APPID" -- "${PROTON_CMD[@]}"
